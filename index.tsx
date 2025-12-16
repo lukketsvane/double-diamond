@@ -5,11 +5,9 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { 
   Hand, 
   Eye, 
-  RotateCw,
   Copy,
   Check,
   Shuffle,
-  Grid3x3,
   RefreshCcw
 } from "lucide-react";
 
@@ -88,7 +86,6 @@ const App = () => {
   const theme = useSystemTheme();
   
   // Interaction State
-  const [snapEnabled, setSnapEnabled] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [interacting, setInteracting] = useState<'orbit' | 'pose' | null>(null);
@@ -102,8 +99,19 @@ const App = () => {
   const selectedMeshRef = useRef<THREE.Mesh | null>(null);
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
+  
+  // Dragging Logic Refs
   const isDraggingRef = useRef(false);
+  const dragPlaneRef = useRef(new THREE.Plane());
+  const dragStartPointRef = useRef(new THREE.Vector3());
+  const dragJointOffsetRef = useRef(new THREE.Quaternion()); // Not strictly needed for lever, but good for tracking
+  const dragStartQuatRef = useRef(new THREE.Quaternion());
+  const dragStartVectorRef = useRef(new THREE.Vector3());
+  const jointWorldPosRef = useRef(new THREE.Vector3());
+  
+  // Fallback trackball refs (if clicking center)
   const previousPointerRef = useRef({ x: 0, y: 0 });
+  const useTrackballFallbackRef = useRef(false);
 
   // Material Refs
   const limbMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
@@ -157,7 +165,7 @@ const App = () => {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.enablePan = false;
-    controls.enabled = true; // Enabled by default, we toggle on pointer down
+    controls.enabled = true;
     controlsRef.current = controls;
 
     // --- Build Creature ---
@@ -184,8 +192,8 @@ const App = () => {
         pivotGroup.rotation.z = verticalAngle;
         creatureGroup.add(pivotGroup);
 
-        // THINNER LIMBS: Reduced dimensions by half
         const seg1Length = 1.5;
+        // Thinner limbs
         const seg1Geo = new THREE.BoxGeometry(0.05, seg1Length, 0.05);
         const seg1 = new THREE.Mesh(seg1Geo, limbMaterialRef.current);
         seg1.position.y = seg1Length / 2;
@@ -201,13 +209,11 @@ const App = () => {
         const l1 = new THREE.LineSegments(e1, edgeMaterialRef.current);
         seg1.add(l1);
 
-        // Smaller Joint
         const joint = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 16), jointMaterialRef.current);
         joint.position.y = seg1Length / 2;
         seg1.add(joint);
 
         const seg2Length = 2.0;
-        // Thinner Cone
         const seg2Geo = new THREE.ConeGeometry(0.025, seg2Length, 4);
         const seg2 = new THREE.Mesh(seg2Geo, limbMaterialRef.current);
         seg2.position.y = seg2Length / 2;
@@ -228,7 +234,7 @@ const App = () => {
     angles.forEach((angle, i) => createLimb(true, angle, i));
     angles.forEach((angle, i) => createLimb(false, angle, i + 4));
 
-    // Load Pose from Cache or Default
+    // Load Pose
     try {
         const cached = localStorage.getItem(CACHE_KEY);
         if (cached) {
@@ -262,12 +268,25 @@ const App = () => {
           if (obj.userData.isJoint && obj.userData.id && pose[obj.userData.id]) {
              const { x, y, z } = pose[obj.userData.id];
              obj.rotation.set(x, y, z);
-          } else if (obj.userData.isJoint && obj.userData.id && !pose[obj.userData.id] && !pose['limb_0_joint_1']) {
-             // Fallback for missing keys if we are not loading a full pose, 
-             // but here we assume 'pose' is a full pose object.
-             // If loading initial pose logic needs specific handling for offsets, it's done in generation.
           }
       });
+  };
+
+  const generateRandomPose = () => {
+     const pose: PoseData = {};
+     for (let i = 0; i < 8; i++) {
+        pose[`limb_${i}_joint_1`] = { 
+            x: (Math.random() - 0.5) * 3, 
+            y: (Math.random() - 0.5) * 3, 
+            z: (Math.random() - 0.5) * 3 
+        };
+        pose[`limb_${i}_joint_2`] = { 
+            x: (Math.random() - 0.5) * 3, 
+            y: (Math.random() - 0.5) * 3, 
+            z: (Math.random() - 0.5) * 3 
+        };
+     }
+     if (creatureRef.current) applyPoseToRef(pose, creatureRef.current);
   };
 
   // --- Dynamic Theme Update ---
@@ -283,7 +302,7 @@ const App = () => {
 
     limbMaterialRef.current.color.setHex(palette.limb);
     highlightMaterialRef.current.color.setHex(palette.limb);
-    highlightMaterialRef.current.emissive.setHex(theme === 'dark' ? 0xff3b30 : 0xff453a); // iOS Red
+    highlightMaterialRef.current.emissive.setHex(theme === 'dark' ? 0xff3b30 : 0xff453a); 
     
     jointMaterialRef.current.color.setHex(palette.joint);
     edgeMaterialRef.current.color.setHex(palette.edge);
@@ -308,7 +327,7 @@ const App = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, [handleResize]);
 
-  // --- Smart Interaction Logic (Both Active) ---
+  // --- Smart Interaction Logic (Lever Dragging) ---
   const handlePointerDown = (e: React.PointerEvent) => {
     const rect = rendererRef.current!.domElement.getBoundingClientRect();
     mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -320,30 +339,59 @@ const App = () => {
     const hit = intersects.find(i => i.object.userData.isPart);
     
     if (hit) {
-        // --- POSE MODE ACTIVATED ---
+        // --- POSE MODE ---
         isDraggingRef.current = true;
         setInteracting('pose');
-        if (controlsRef.current) controlsRef.current.enabled = false; // Disable orbit
+        if (controlsRef.current) controlsRef.current.enabled = false;
         
-        previousPointerRef.current = { x: e.clientX, y: e.clientY };
+        const mesh = hit.object as THREE.Mesh;
+        const wrapper = mesh.parent; // This is the joint wrapper
         
-        if (selectedMeshRef.current) {
-            selectedMeshRef.current.material = limbMaterialRef.current;
-        }
-        
-        selectedMeshRef.current = hit.object as THREE.Mesh;
+        if (selectedMeshRef.current) selectedMeshRef.current.material = limbMaterialRef.current;
+        selectedMeshRef.current = mesh;
         selectedMeshRef.current.material = highlightMaterialRef.current;
         
-        const wrapper = selectedMeshRef.current.parent;
         if (wrapper && wrapper.userData.isJoint) {
            setSelectedId(wrapper.userData.id);
+
+           // SETUP LEVER DRAG
+           const jointWorldPos = new THREE.Vector3();
+           wrapper.getWorldPosition(jointWorldPos);
+           jointWorldPosRef.current.copy(jointWorldPos);
+
+           // 1. Define Plane facing camera
+           const camDir = new THREE.Vector3();
+           cameraRef.current!.getWorldDirection(camDir);
+           dragPlaneRef.current.setFromNormalAndCoplanarPoint(camDir, jointWorldPos);
+
+           // 2. Intersect plane to get start point
+           const planeIntersect = new THREE.Vector3();
+           raycasterRef.current.ray.intersectPlane(dragPlaneRef.current, planeIntersect);
+
+           if (planeIntersect) {
+             const distToCenter = planeIntersect.distanceTo(jointWorldPos);
+             
+             // If grabbed too close to pivot, use trackball fallback
+             if (distToCenter < 0.2) {
+                useTrackballFallbackRef.current = true;
+                previousPointerRef.current = { x: e.clientX, y: e.clientY };
+             } else {
+                useTrackballFallbackRef.current = false;
+                dragStartPointRef.current.copy(planeIntersect);
+                dragStartVectorRef.current.subVectors(planeIntersect, jointWorldPos).normalize();
+                
+                // Store initial world quaternion of the joint? No, store local.
+                // We will apply rotation diff to current world, then reset.
+                // Actually easier: Calculate Delta Rotation (World Space) and apply to Object (World Space)
+             }
+           }
         }
         
         e.stopPropagation(); 
     } else {
-        // --- ORBIT MODE ACTIVATED ---
+        // --- ORBIT MODE ---
         setInteracting('orbit');
-        if (controlsRef.current) controlsRef.current.enabled = true; // Enable orbit
+        if (controlsRef.current) controlsRef.current.enabled = true;
         
         if (selectedMeshRef.current) {
             selectedMeshRef.current.material = limbMaterialRef.current;
@@ -354,51 +402,71 @@ const App = () => {
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-      // Only handle drag if we are in pose mode (Orbit handles itself via controls)
       if (!isDraggingRef.current || !selectedMeshRef.current) return;
       
-      const deltaX = e.clientX - previousPointerRef.current.x;
-      const deltaY = e.clientY - previousPointerRef.current.y;
-      previousPointerRef.current = { x: e.clientX, y: e.clientY };
-
       const wrapper = selectedMeshRef.current.parent;
-      if (wrapper && wrapper.userData.isJoint) {
-          const sensitivity = 0.005;
-          const camera = cameraRef.current;
-          if (!camera) return;
+      if (!wrapper || !wrapper.userData.isJoint) return;
 
-          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-          
+      const rect = rendererRef.current!.domElement.getBoundingClientRect();
+      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      // UPDATE RAYCASTER FOR MOVE
+      raycasterRef.current.setFromCamera(new THREE.Vector2(nx, ny), cameraRef.current!);
+
+      if (useTrackballFallbackRef.current) {
+          // --- FALLBACK: SCREEN DELTA (Trackball-ish) ---
+          const deltaX = e.clientX - previousPointerRef.current.x;
+          const deltaY = e.clientY - previousPointerRef.current.y;
+          previousPointerRef.current = { x: e.clientX, y: e.clientY };
+
+          const sensitivity = 0.005;
+          const cam = cameraRef.current!;
+          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+
           const rotX = new THREE.Quaternion().setFromAxisAngle(camRight, deltaY * sensitivity);
           const rotY = new THREE.Quaternion().setFromAxisAngle(camUp, deltaX * sensitivity);
-          
           const deltaQ = rotY.multiply(rotX);
           
           const currentWorldQ = new THREE.Quaternion();
           wrapper.getWorldQuaternion(currentWorldQ);
-          
           const newWorldQ = deltaQ.multiply(currentWorldQ);
           
           const parent = wrapper.parent;
           const parentWorldQ = new THREE.Quaternion();
-          if (parent) {
-             parent.getWorldQuaternion(parentWorldQ);
-          }
-          
-          const newLocalQ = parentWorldQ.invert().multiply(newWorldQ);
-          
-          wrapper.quaternion.copy(newLocalQ);
+          if (parent) parent.getWorldQuaternion(parentWorldQ);
+          wrapper.quaternion.copy(parentWorldQ.invert().multiply(newWorldQ));
 
-          if (snapEnabled) {
-              const euler = new THREE.Euler().setFromQuaternion(newLocalQ);
-              const snapStep = THREE.MathUtils.degToRad(15); 
+      } else {
+          // --- LEVER DRAG (Planar Projection) ---
+          const planeIntersect = new THREE.Vector3();
+          raycasterRef.current.ray.intersectPlane(dragPlaneRef.current, planeIntersect);
+
+          if (planeIntersect) {
+              const currentVector = new THREE.Vector3().subVectors(planeIntersect, jointWorldPosRef.current).normalize();
+              const startVector = dragStartVectorRef.current;
               
-              euler.x = Math.round(euler.x / snapStep) * snapStep;
-              euler.y = Math.round(euler.y / snapStep) * snapStep;
-              euler.z = Math.round(euler.z / snapStep) * snapStep;
+              // Quaternion to rotate StartVector to CurrentVector
+              const deltaQ = new THREE.Quaternion().setFromUnitVectors(startVector, currentVector);
               
-              wrapper.rotation.copy(euler);
+              // To apply this interactively without accumulation drift:
+              // We should really base it on the "Snapshot at Down".
+              // But for simplicity of this state-less loop, we can do incremental if we update startVector.
+              // Let's do incremental for "feel".
+              
+              const currentWorldQ = new THREE.Quaternion();
+              wrapper.getWorldQuaternion(currentWorldQ);
+              
+              const newWorldQ = deltaQ.multiply(currentWorldQ);
+              
+              const parent = wrapper.parent;
+              const parentWorldQ = new THREE.Quaternion();
+              if (parent) parent.getWorldQuaternion(parentWorldQ);
+              wrapper.quaternion.copy(parentWorldQ.invert().multiply(newWorldQ));
+              
+              // Update start vector so next frame is relative to this one
+              dragStartVectorRef.current.copy(currentVector);
           }
       }
   };
@@ -406,9 +474,7 @@ const App = () => {
   const handlePointerUp = () => {
       isDraggingRef.current = false;
       setInteracting(null);
-      if (controlsRef.current) {
-          controlsRef.current.enabled = true; // Always re-enable orbit on release
-      }
+      if (controlsRef.current) controlsRef.current.enabled = true;
   };
 
   const resetPose = () => {
@@ -428,8 +494,6 @@ const App = () => {
           }
       });
       const json = JSON.stringify(poseData, null, 2);
-      
-      // Cache
       localStorage.setItem(CACHE_KEY, json);
 
       try {
@@ -458,7 +522,7 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
 
-       {/* Floating Top Label for Selection */}
+       {/* Floating Top Label */}
        <div className={`absolute top-0 left-0 right-0 p-4 pt-[max(1.5rem,env(safe-area-inset-top))] flex justify-center pointer-events-none transition-opacity duration-300 z-40 ${selectedId ? 'opacity-100' : 'opacity-0'}`}>
           <div className={`px-4 py-1.5 rounded-full backdrop-blur-xl text-[10px] font-bold tracking-widest uppercase shadow-lg border ${
              isDark ? 'bg-white/10 text-white border-white/10' : 'bg-white/70 text-black border-black/5'
@@ -467,25 +531,31 @@ const App = () => {
           </div>
        </div>
 
-       {/* Floating Control Pad (2x2 Grid) */}
+       {/* Floating Control Pad */}
        <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center">
             
             <div className={`grid grid-cols-2 gap-2 p-2 rounded-2xl backdrop-blur-2xl border shadow-2xl ${
                  isDark ? 'bg-neutral-900/60 border-white/10 shadow-black/50' : 'bg-white/60 border-black/5 shadow-neutral-300/40'
             }`}>
-                 {/* Top Row */}
-                 <button className={`${buttonClass} ${interacting === 'orbit' ? (isDark ? 'bg-white/20' : 'bg-black/20') : ''}`}>
+                 {/* Top Row: Indicators/Modes */}
+                 <div className={`${buttonClass} ${interacting === 'orbit' ? (isDark ? 'bg-white/20' : 'bg-black/20') : ''}`}>
                     <Eye size={22} strokeWidth={2} className="opacity-80"/>
-                 </button>
+                 </div>
 
-                 <button className={`${buttonClass} ${interacting === 'pose' ? (isDark ? 'bg-white/20' : 'bg-black/20') : ''}`}>
+                 <div className={`${buttonClass} ${interacting === 'pose' ? (isDark ? 'bg-white/20' : 'bg-black/20') : ''}`}>
                     <Hand size={22} strokeWidth={2} className="opacity-80"/>
-                 </button>
+                 </div>
 
-                 {/* Bottom Row */}
-                 <button onClick={copyPose} className={`${buttonClass}`}>
-                    {copied ? <Check size={22} className="text-green-500" strokeWidth={3} /> : <Copy size={22} strokeWidth={2} className="opacity-80"/>}
-                 </button>
+                 {/* Bottom Row: Actions */}
+                 {/* Stacked Copy/Random Button */}
+                 <div className="grid grid-cols-2 gap-1 h-full w-full">
+                     <button onClick={copyPose} className={`${buttonClass} w-full h-full !p-0`}>
+                        {copied ? <Check size={20} className="text-green-500" strokeWidth={3} /> : <Copy size={20} strokeWidth={2} className="opacity-80"/>}
+                     </button>
+                     <button onClick={generateRandomPose} className={`${buttonClass} w-full h-full !p-0`}>
+                        <Shuffle size={20} strokeWidth={2} className="opacity-80"/>
+                     </button>
+                 </div>
 
                  <button onClick={resetPose} className={`${buttonClass}`}>
                     <RefreshCcw size={22} strokeWidth={2} className="opacity-80"/>
