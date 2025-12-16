@@ -6,11 +6,11 @@ import {
   Hand, 
   Eye, 
   RotateCw,
-  RotateCcw,
   Copy,
   Check,
   Shuffle,
-  Grid3x3
+  Grid3x3,
+  RefreshCcw
 } from "lucide-react";
 
 // --- Types ---
@@ -60,66 +60,7 @@ const COLORS = {
   }
 };
 
-// Generate Presets
-const generatePreset = (type: string): PoseData => {
-  const pose: PoseData = {};
-  const limbCount = 8;
-  for (let i = 0; i < limbCount; i++) {
-    const isUpper = i < 4;
-    const setJ = (j: 1 | 2, x: number, y: number, z: number) => {
-      pose[`limb_${i}_joint_${j}`] = { x, y, z };
-    };
-
-    if (type === 'default') return INITIAL_POSE;
-    
-    if (type === 'standing') {
-       setJ(1, 0, 0, isUpper ? 2.5 : 0.2); 
-       setJ(2, 0, 0, 0);
-    } else if (type === 'sprawled') {
-       setJ(1, 0, 1.5, 0);
-       setJ(2, 0, 0, 0);
-    } else if (type === 'curled') {
-       setJ(1, 1.5, 0, 2.0);
-       setJ(2, -2.5, 0, 0);
-    } else if (type === 't-pose') {
-       setJ(1, 0, 1.57, 0);
-       setJ(2, 0, 0, 0);
-    } else if (type === 'walking') {
-       const odd = i % 2 === 0;
-       setJ(1, odd ? 0.5 : -0.5, 0, 0.5);
-       setJ(2, odd ? 1.0 : 0.0, 0, 0);
-    } else if (type === 'chaos') {
-       setJ(1, Math.random()*2, Math.random()*2, Math.random()*2);
-       setJ(2, Math.random()*2, Math.random()*2, Math.random()*2);
-    } else if (type === 'alert') {
-       setJ(1, -0.5, 0, -0.5);
-       setJ(2, -0.5, 0, 0);
-    } else if (type === 'box') {
-       setJ(1, 0, 0, 1.57);
-       setJ(2, 0, 0, 1.57);
-    } else if (type === 'twisted') {
-        setJ(1, 0, 2, i * 0.5);
-        setJ(2, 0, 0, 0);
-    } else {
-       setJ(1, 0, 0, 0);
-       setJ(2, 0, 0, 0);
-    }
-  }
-  return pose;
-};
-
-const PRESETS = [
-  INITIAL_POSE,
-  generatePreset('standing'),
-  generatePreset('sprawled'),
-  generatePreset('curled'),
-  generatePreset('t-pose'),
-  generatePreset('walking'),
-  generatePreset('chaos'),
-  generatePreset('alert'),
-  generatePreset('box'),
-  generatePreset('twisted'),
-];
+const CACHE_KEY = "mento_pose_cache";
 
 // --- Hook: System Theme ---
 const useSystemTheme = (): ThemeMode => {
@@ -146,13 +87,12 @@ const App = () => {
   const mountRef = useRef<HTMLDivElement>(null);
   const theme = useSystemTheme();
   
-  const [orbitEnabled, setOrbitEnabled] = useState(true);
-  const [poseEnabled, setPoseEnabled] = useState(false);
+  // Interaction State
   const [snapEnabled, setSnapEnabled] = useState(false);
-  
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  
+  const [interacting, setInteracting] = useState<'orbit' | 'pose' | null>(null);
+
   // Refs
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -165,7 +105,7 @@ const App = () => {
   const isDraggingRef = useRef(false);
   const previousPointerRef = useRef({ x: 0, y: 0 });
 
-  // Material Refs for dynamic updates
+  // Material Refs
   const limbMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const highlightMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const jointMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
@@ -217,7 +157,7 @@ const App = () => {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.enablePan = false;
-    controls.enabled = true;
+    controls.enabled = true; // Enabled by default, we toggle on pointer down
     controlsRef.current = controls;
 
     // --- Build Creature ---
@@ -244,8 +184,9 @@ const App = () => {
         pivotGroup.rotation.z = verticalAngle;
         creatureGroup.add(pivotGroup);
 
+        // THINNER LIMBS: Reduced dimensions by half
         const seg1Length = 1.5;
-        const seg1Geo = new THREE.BoxGeometry(0.1, seg1Length, 0.1);
+        const seg1Geo = new THREE.BoxGeometry(0.05, seg1Length, 0.05);
         const seg1 = new THREE.Mesh(seg1Geo, limbMaterialRef.current);
         seg1.position.y = seg1Length / 2;
         seg1.userData = { isPart: true, partType: 'limb', limbIndex: index, segmentIndex: 1 };
@@ -253,9 +194,6 @@ const App = () => {
         const seg1Wrapper = new THREE.Group();
         seg1Wrapper.userData = { isJoint: true, id: `limb_${index}_joint_1` };
         
-        const pose1 = INITIAL_POSE[`limb_${index}_joint_1`];
-        if (pose1) seg1Wrapper.rotation.set(pose1.x, pose1.y, pose1.z);
-
         seg1Wrapper.add(seg1);
         pivotGroup.add(seg1Wrapper);
         
@@ -263,12 +201,14 @@ const App = () => {
         const l1 = new THREE.LineSegments(e1, edgeMaterialRef.current);
         seg1.add(l1);
 
-        const joint = new THREE.Mesh(new THREE.SphereGeometry(0.0625, 16, 16), jointMaterialRef.current);
+        // Smaller Joint
+        const joint = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 16), jointMaterialRef.current);
         joint.position.y = seg1Length / 2;
         seg1.add(joint);
 
         const seg2Length = 2.0;
-        const seg2Geo = new THREE.ConeGeometry(0.05, seg2Length, 4);
+        // Thinner Cone
+        const seg2Geo = new THREE.ConeGeometry(0.025, seg2Length, 4);
         const seg2 = new THREE.Mesh(seg2Geo, limbMaterialRef.current);
         seg2.position.y = seg2Length / 2;
         seg2.userData = { isPart: true, partType: 'limb', limbIndex: index, segmentIndex: 2 };
@@ -276,13 +216,6 @@ const App = () => {
         const seg2Wrapper = new THREE.Group();
         seg2Wrapper.userData = { isJoint: true, id: `limb_${index}_joint_2` };
         seg2Wrapper.position.y = seg1Length; 
-        
-        const pose2 = INITIAL_POSE[`limb_${index}_joint_2`];
-        if (pose2) {
-             seg2Wrapper.rotation.set(pose2.x, pose2.y, pose2.z);
-        } else {
-             seg2Wrapper.rotation.z = isUpper ? -Math.PI / 1.5 : Math.PI / 1.5;
-        }
 
         seg1Wrapper.add(seg2Wrapper);
         seg2Wrapper.add(seg2);
@@ -294,6 +227,18 @@ const App = () => {
 
     angles.forEach((angle, i) => createLimb(true, angle, i));
     angles.forEach((angle, i) => createLimb(false, angle, i + 4));
+
+    // Load Pose from Cache or Default
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+            applyPoseToRef(JSON.parse(cached), creatureGroup);
+        } else {
+            applyPoseToRef(INITIAL_POSE, creatureGroup);
+        }
+    } catch (e) {
+        applyPoseToRef(INITIAL_POSE, creatureGroup);
+    }
 
     const animate = () => {
       requestAnimationFrame(animate);
@@ -310,6 +255,20 @@ const App = () => {
       renderer.dispose();
     };
   }, []);
+
+  // --- Helpers ---
+  const applyPoseToRef = (pose: PoseData, group: THREE.Group) => {
+      group.traverse((obj) => {
+          if (obj.userData.isJoint && obj.userData.id && pose[obj.userData.id]) {
+             const { x, y, z } = pose[obj.userData.id];
+             obj.rotation.set(x, y, z);
+          } else if (obj.userData.isJoint && obj.userData.id && !pose[obj.userData.id] && !pose['limb_0_joint_1']) {
+             // Fallback for missing keys if we are not loading a full pose, 
+             // but here we assume 'pose' is a full pose object.
+             // If loading initial pose logic needs specific handling for offsets, it's done in generation.
+          }
+      });
+  };
 
   // --- Dynamic Theme Update ---
   useEffect(() => {
@@ -349,13 +308,7 @@ const App = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, [handleResize]);
 
-  // --- Interaction Logic ---
-  useEffect(() => {
-    if (controlsRef.current && !isDraggingRef.current) {
-        controlsRef.current.enabled = orbitEnabled;
-    }
-  }, [orbitEnabled]);
-
+  // --- Smart Interaction Logic (Both Active) ---
   const handlePointerDown = (e: React.PointerEvent) => {
     const rect = rendererRef.current!.domElement.getBoundingClientRect();
     mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -366,9 +319,11 @@ const App = () => {
     const intersects = raycasterRef.current.intersectObjects(creatureRef.current!.children, true);
     const hit = intersects.find(i => i.object.userData.isPart);
     
-    if (hit && poseEnabled) {
+    if (hit) {
+        // --- POSE MODE ACTIVATED ---
         isDraggingRef.current = true;
-        if (controlsRef.current) controlsRef.current.enabled = false;
+        setInteracting('pose');
+        if (controlsRef.current) controlsRef.current.enabled = false; // Disable orbit
         
         previousPointerRef.current = { x: e.clientX, y: e.clientY };
         
@@ -386,20 +341,21 @@ const App = () => {
         
         e.stopPropagation(); 
     } else {
+        // --- ORBIT MODE ACTIVATED ---
+        setInteracting('orbit');
+        if (controlsRef.current) controlsRef.current.enabled = true; // Enable orbit
+        
         if (selectedMeshRef.current) {
             selectedMeshRef.current.material = limbMaterialRef.current;
             selectedMeshRef.current = null;
             setSelectedId(null);
         }
-
-        if (controlsRef.current) {
-            controlsRef.current.enabled = orbitEnabled;
-        }
     }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-      if (!isDraggingRef.current || !selectedMeshRef.current || !poseEnabled) return;
+      // Only handle drag if we are in pose mode (Orbit handles itself via controls)
+      if (!isDraggingRef.current || !selectedMeshRef.current) return;
       
       const deltaX = e.clientX - previousPointerRef.current.x;
       const deltaY = e.clientY - previousPointerRef.current.y;
@@ -449,28 +405,14 @@ const App = () => {
 
   const handlePointerUp = () => {
       isDraggingRef.current = false;
+      setInteracting(null);
       if (controlsRef.current) {
-          controlsRef.current.enabled = orbitEnabled;
+          controlsRef.current.enabled = true; // Always re-enable orbit on release
       }
   };
 
   const resetPose = () => {
-     applyPose(INITIAL_POSE);
-  };
-
-  const randomizePose = () => {
-      const randomPreset = PRESETS[Math.floor(Math.random() * PRESETS.length)];
-      applyPose(randomPreset);
-  };
-
-  const applyPose = (pose: PoseData) => {
-      if(!creatureRef.current) return;
-      creatureRef.current.traverse((obj) => {
-          if (obj.userData.isJoint && obj.userData.id && pose[obj.userData.id]) {
-             const { x, y, z } = pose[obj.userData.id];
-             obj.rotation.set(x, y, z);
-          }
-      });
+     if (creatureRef.current) applyPoseToRef(INITIAL_POSE, creatureRef.current);
   };
 
   const copyPose = async () => {
@@ -486,6 +428,10 @@ const App = () => {
           }
       });
       const json = JSON.stringify(poseData, null, 2);
+      
+      // Cache
+      localStorage.setItem(CACHE_KEY, json);
+
       try {
           await navigator.clipboard.writeText(json);
           setCopied(true);
@@ -497,9 +443,9 @@ const App = () => {
 
   const isDark = theme === 'dark';
   const bgClass = isDark ? 'bg-black text-white' : 'bg-[#F2F2F7] text-black';
-  const actionBtnClass = isDark 
-    ? 'text-neutral-400 hover:text-white hover:bg-white/10'
-    : 'text-neutral-500 hover:text-black hover:bg-black/5';
+  const buttonClass = `p-4 rounded-xl flex items-center justify-center transition-all duration-200 active:scale-95 ${
+      isDark ? 'bg-white/5 hover:bg-white/10 text-white border-white/5' : 'bg-black/5 hover:bg-black/10 text-black border-black/5'
+  }`;
 
   return (
     <div className={`relative w-full h-full overflow-hidden select-none transition-colors duration-500 ${bgClass}`}>
@@ -512,53 +458,45 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
 
-       {/* Top Info Bar */}
-       <div className={`absolute top-0 left-0 right-0 p-4 pt-[max(1rem,env(safe-area-inset-top))] flex justify-between items-start pointer-events-none z-40`}>
-          <div className={`text-xs font-mono opacity-50`}>Mento 3D</div>
-          {selectedId && (
-            <div className={`px-2 py-1 rounded text-xs font-bold tracking-widest uppercase backdrop-blur-sm shadow-sm ${
-               isDark ? 'bg-white/10 text-white' : 'bg-white/50 text-black'
+       {/* Floating Top Label for Selection */}
+       <div className={`absolute top-0 left-0 right-0 p-4 pt-[max(1.5rem,env(safe-area-inset-top))] flex justify-center pointer-events-none transition-opacity duration-300 z-40 ${selectedId ? 'opacity-100' : 'opacity-0'}`}>
+          <div className={`px-4 py-1.5 rounded-full backdrop-blur-xl text-[10px] font-bold tracking-widest uppercase shadow-lg border ${
+             isDark ? 'bg-white/10 text-white border-white/10' : 'bg-white/70 text-black border-black/5'
+          }`}>
+             {selectedId ? selectedId.replace(/_/g, ' ') : ''}
+          </div>
+       </div>
+
+       {/* Floating Control Pad (2x2 Grid) */}
+       <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center">
+            
+            <div className={`grid grid-cols-2 gap-2 p-2 rounded-2xl backdrop-blur-2xl border shadow-2xl ${
+                 isDark ? 'bg-neutral-900/60 border-white/10 shadow-black/50' : 'bg-white/60 border-black/5 shadow-neutral-300/40'
             }`}>
-               {selectedId.replace(/_/g, ' ')}
+                 {/* Top Row */}
+                 <button className={`${buttonClass} ${interacting === 'orbit' ? (isDark ? 'bg-white/20' : 'bg-black/20') : ''}`}>
+                    <Eye size={22} strokeWidth={2} className="opacity-80"/>
+                 </button>
+
+                 <button className={`${buttonClass} ${interacting === 'pose' ? (isDark ? 'bg-white/20' : 'bg-black/20') : ''}`}>
+                    <Hand size={22} strokeWidth={2} className="opacity-80"/>
+                 </button>
+
+                 {/* Bottom Row */}
+                 <button onClick={copyPose} className={`${buttonClass}`}>
+                    {copied ? <Check size={22} className="text-green-500" strokeWidth={3} /> : <Copy size={22} strokeWidth={2} className="opacity-80"/>}
+                 </button>
+
+                 <button onClick={resetPose} className={`${buttonClass}`}>
+                    <RefreshCcw size={22} strokeWidth={2} className="opacity-80"/>
+                 </button>
             </div>
-          )}
+
+            <div className={`mt-4 text-[10px] font-bold tracking-[0.2em] uppercase opacity-40 ${isDark ? 'text-white' : 'text-black'}`}>
+                {interacting === 'pose' ? 'Pose Mode' : interacting === 'orbit' ? 'Orbit Mode' : 'Smart Mode'}
+            </div>
        </div>
 
-       {/* Bottom Toolbar - Standard Fixed Layout */}
-       <div className={`absolute bottom-0 left-0 right-0 pb-[env(safe-area-inset-bottom)] z-50 pointer-events-auto transition-colors duration-300 border-t backdrop-blur-md ${
-           isDark ? 'bg-neutral-900/80 border-white/10' : 'bg-white/80 border-black/10'
-       }`}>
-           <div className="flex justify-between items-center px-6 py-3">
-                {/* Left Group: Modes */}
-                <div className="flex gap-4">
-                    <button onClick={() => { setOrbitEnabled(true); setPoseEnabled(false); }} 
-                      className={`p-2 transition-colors ${orbitEnabled ? (isDark ? 'text-white' : 'text-black') : 'text-neutral-400'}`}>
-                      <Eye size={24} strokeWidth={1.5} />
-                    </button>
-                    <button onClick={() => { setOrbitEnabled(false); setPoseEnabled(true); }}
-                      className={`p-2 transition-colors ${poseEnabled ? (isDark ? 'text-white' : 'text-black') : 'text-neutral-400'}`}>
-                      <Hand size={24} strokeWidth={1.5} />
-                    </button>
-                </div>
-
-                {/* Right Group: Actions */}
-                <div className="flex gap-4">
-                    <button onClick={copyPose} className={`p-2 active:opacity-50 ${actionBtnClass}`}>
-                        {copied ? <Check size={24} className="text-green-500" /> : <Copy size={24} strokeWidth={1.5} />}
-                    </button>
-                    <button onClick={randomizePose} className={`p-2 active:opacity-50 ${actionBtnClass}`}>
-                        <Shuffle size={24} strokeWidth={1.5} />
-                    </button>
-                    <button onClick={resetPose} className={`p-2 active:opacity-50 ${actionBtnClass}`}>
-                        <RotateCcw size={24} strokeWidth={1.5} />
-                    </button>
-                    <button onClick={() => setSnapEnabled(!snapEnabled)} 
-                       className={`p-2 transition-colors ${snapEnabled ? (isDark ? 'text-white' : 'text-black') : 'text-neutral-400'}`}>
-                       <Grid3x3 size={24} strokeWidth={1.5} />
-                    </button>
-                </div>
-           </div>
-       </div>
     </div>
   );
 };
