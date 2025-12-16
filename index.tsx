@@ -5,10 +5,12 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { 
   Hand, 
   Eye, 
-  RotateCcw, 
+  RotateCw,
+  RotateCcw,
   Copy,
   Check,
-  Shuffle
+  Shuffle,
+  Grid3x3
 } from "lucide-react";
 
 // --- Types ---
@@ -147,6 +149,7 @@ const App = () => {
   
   const [orbitEnabled, setOrbitEnabled] = useState(true);
   const [poseEnabled, setPoseEnabled] = useState(true);
+  const [snapEnabled, setSnapEnabled] = useState(false);
   
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(true);
@@ -391,7 +394,7 @@ const App = () => {
         }
         
         selectedMeshRef.current = hit.object as THREE.Mesh;
-        // Apply Highlight Material (Swaps reference)
+        // Apply Highlight Material
         selectedMeshRef.current.material = highlightMaterialRef.current;
         
         const wrapper = selectedMeshRef.current.parent;
@@ -403,7 +406,6 @@ const App = () => {
     } else {
         // Clicked Background
         if (selectedMeshRef.current) {
-            // Revert material on deselect
             selectedMeshRef.current.material = limbMaterialRef.current;
             selectedMeshRef.current = null;
             setSelectedId(null);
@@ -421,12 +423,56 @@ const App = () => {
       const deltaX = e.clientX - previousPointerRef.current.x;
       const deltaY = e.clientY - previousPointerRef.current.y;
       previousPointerRef.current = { x: e.clientX, y: e.clientY };
-      
+
       const wrapper = selectedMeshRef.current.parent;
       if (wrapper && wrapper.userData.isJoint) {
-          const sensitivity = 0.008;
-          wrapper.rotateX(-deltaY * sensitivity);
-          wrapper.rotateZ(-deltaX * sensitivity);
+          const sensitivity = 0.005;
+          const camera = cameraRef.current;
+          if (!camera) return;
+
+          // Calculate Screen-Relative Rotation Axes
+          // Drag X (Horizontal) -> Rotate around Camera Up
+          // Drag Y (Vertical) -> Rotate around Camera Right
+          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+          
+          const rotX = new THREE.Quaternion().setFromAxisAngle(camRight, deltaY * sensitivity);
+          const rotY = new THREE.Quaternion().setFromAxisAngle(camUp, deltaX * sensitivity);
+          
+          // Combined rotation in World Space
+          const deltaQ = rotY.multiply(rotX);
+          
+          // Apply to Object: 
+          // 1. Get current World Q
+          const currentWorldQ = new THREE.Quaternion();
+          wrapper.getWorldQuaternion(currentWorldQ);
+          
+          // 2. Calculate New World Q
+          const newWorldQ = deltaQ.multiply(currentWorldQ);
+          
+          // 3. Convert to Local Q relative to parent
+          const parent = wrapper.parent;
+          const parentWorldQ = new THREE.Quaternion();
+          if (parent) {
+             parent.getWorldQuaternion(parentWorldQ);
+          }
+          
+          const newLocalQ = parentWorldQ.invert().multiply(newWorldQ);
+          
+          // 4. Update Object
+          wrapper.quaternion.copy(newLocalQ);
+
+          // 5. Snap Logic
+          if (snapEnabled) {
+              const euler = new THREE.Euler().setFromQuaternion(newLocalQ);
+              const snapStep = THREE.MathUtils.degToRad(15); // Snap to 15, 30, 45, 90...
+              
+              euler.x = Math.round(euler.x / snapStep) * snapStep;
+              euler.y = Math.round(euler.y / snapStep) * snapStep;
+              euler.z = Math.round(euler.z / snapStep) * snapStep;
+              
+              wrapper.rotation.copy(euler);
+          }
       }
   };
 
@@ -458,7 +504,6 @@ const App = () => {
 
   const copyPose = async () => {
       if (!creatureRef.current) return;
-      
       const poseData: PoseData = {};
       creatureRef.current.traverse((obj) => {
           if (obj.userData.isJoint && obj.userData.id) {
@@ -469,15 +514,7 @@ const App = () => {
               };
           }
       });
-      
       const json = JSON.stringify(poseData, null, 2);
-
-      try {
-        localStorage.setItem('ment0_saved_pose', json);
-      } catch (e) {
-        console.warn("Could not cache pose");
-      }
-
       try {
           await navigator.clipboard.writeText(json);
           setCopied(true);
@@ -557,32 +594,43 @@ const App = () => {
                 </button>
             </div>
 
-            {/* Row 2: Actions */}
+            {/* Row 2: Actions & Snap */}
             <div className="grid grid-cols-2 gap-2 h-14">
-                 {/* Split Copy/Random Button */}
-                 <div className={`grid grid-cols-2 gap-1 backdrop-blur-xl rounded-2xl border p-1 ${panelClass}`}>
+                 {/* Action Group: Copy / Random / Reset */}
+                 <div className={`grid grid-cols-3 gap-0.5 backdrop-blur-xl rounded-2xl border p-1 ${panelClass}`}>
                     <button 
                         onClick={copyPose}
-                        className={`flex flex-col items-center justify-center rounded-xl active:scale-95 transition-all ${actionBtnClass}`}
-                        title="Copy to Clipboard & Cache"
+                        className={`flex items-center justify-center rounded-lg active:scale-95 transition-all ${actionBtnClass}`}
+                        title="Copy"
                     >
-                        {copied ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                        {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
                     </button>
                     <button 
                         onClick={randomizePose}
-                        className={`flex flex-col items-center justify-center rounded-xl active:scale-95 transition-all ${actionBtnClass}`}
-                        title="Randomize Preset"
+                        className={`flex items-center justify-center rounded-lg active:scale-95 transition-all ${actionBtnClass}`}
+                        title="Randomize"
                     >
-                        <Shuffle className="w-5 h-5" />
+                        <Shuffle className="w-4 h-4" />
+                    </button>
+                    <button 
+                        onClick={resetPose}
+                        className={`flex items-center justify-center rounded-lg active:scale-95 transition-all ${actionBtnClass}`}
+                        title="Reset"
+                    >
+                        <RotateCcw className="w-4 h-4" />
                     </button>
                  </div>
 
-                 {/* Reset Button */}
+                 {/* Snap Toggle (Replaces old Reset location) */}
                  <button 
-                    onClick={resetPose}
-                    className={`backdrop-blur-xl rounded-2xl border flex items-center justify-center active:scale-95 transition-all ${panelClass} ${actionBtnClass}`}
+                    onClick={() => setSnapEnabled(!snapEnabled)}
+                    className={`rounded-2xl flex flex-col items-center justify-center gap-1 transition-all active:scale-95 border ${getBtnClass(snapEnabled)}`}
                  >
-                    <RotateCcw className="w-5 h-5" />
+                    {/* Snap Icon: RotateCw symbol to imply rotation increment or Grid */}
+                    <RotateCw className="w-5 h-5" />
+                    <span className="text-[10px] uppercase font-mono tracking-wider">
+                        {snapEnabled ? 'Snap' : 'Free'}
+                    </span>
                  </button>
             </div>
 
