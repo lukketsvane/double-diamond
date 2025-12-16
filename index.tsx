@@ -39,24 +39,24 @@ const INITIAL_POSE: PoseData = {
 
 const COLORS = {
   light: {
-    bg: 0xffffff,
-    fog: 0xffffff,
-    limb: 0x1a1a1a,
+    bg: 0xf2f2f7, // iOS System Gray 6
+    fog: 0xf2f2f7,
+    limb: 0x1c1c1e, // iOS System Gray 6 Dark
     joint: 0x000000,
-    edge: 0x444444,
+    edge: 0xaeaeb2,
     ambient: 0xffffff,
     directional: 0xffffff,
-    back: 0xccddff
+    back: 0x8e8e93
   },
   dark: {
     bg: 0x000000,
     fog: 0x000000,
-    limb: 0xeeeeee,
-    joint: 0x333333,
-    edge: 0x888888,
+    limb: 0xf2f2f7,
+    joint: 0x2c2c2e,
+    edge: 0x636366,
     ambient: 0x404040,
     directional: 0xffffff,
-    back: 0x4455ff
+    back: 0x0a84ff
   }
 };
 
@@ -123,7 +123,6 @@ const PRESETS = [
 
 // --- Hook: System Theme ---
 const useSystemTheme = (): ThemeMode => {
-  // Safe SSR default
   const getTheme = () => {
     if (typeof window === 'undefined') return 'light';
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -148,11 +147,10 @@ const App = () => {
   const theme = useSystemTheme();
   
   const [orbitEnabled, setOrbitEnabled] = useState(true);
-  const [poseEnabled, setPoseEnabled] = useState(true);
+  const [poseEnabled, setPoseEnabled] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(false);
   
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   
   // Refs
@@ -178,13 +176,13 @@ const App = () => {
     back: THREE.DirectionalLight;
   } | null>(null);
 
-  // --- 3D Initialization (Run Once) ---
+  // --- 3D Initialization ---
   useEffect(() => {
     if (!mountRef.current) return;
 
     // Scene
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x000000, 0.03); // Initial color, updated by effect
+    scene.fog = new THREE.FogExp2(0x000000, 0.03); 
     sceneRef.current = scene;
 
     // Camera
@@ -246,7 +244,6 @@ const App = () => {
         pivotGroup.rotation.z = verticalAngle;
         creatureGroup.add(pivotGroup);
 
-        // Segment 1 (Thinner: 0.2 -> 0.1)
         const seg1Length = 1.5;
         const seg1Geo = new THREE.BoxGeometry(0.1, seg1Length, 0.1);
         const seg1 = new THREE.Mesh(seg1Geo, limbMaterialRef.current);
@@ -256,24 +253,20 @@ const App = () => {
         const seg1Wrapper = new THREE.Group();
         seg1Wrapper.userData = { isJoint: true, id: `limb_${index}_joint_1` };
         
-        // Initial Pose
         const pose1 = INITIAL_POSE[`limb_${index}_joint_1`];
         if (pose1) seg1Wrapper.rotation.set(pose1.x, pose1.y, pose1.z);
 
         seg1Wrapper.add(seg1);
         pivotGroup.add(seg1Wrapper);
         
-        // Edge
         const e1 = new THREE.EdgesGeometry(seg1Geo);
         const l1 = new THREE.LineSegments(e1, edgeMaterialRef.current);
         seg1.add(l1);
 
-        // Joint Sphere (1/4th size: 0.25 -> 0.0625)
         const joint = new THREE.Mesh(new THREE.SphereGeometry(0.0625, 16, 16), jointMaterialRef.current);
         joint.position.y = seg1Length / 2;
         seg1.add(joint);
 
-        // Segment 2 (Cone, half radius: 0.1 -> 0.05)
         const seg2Length = 2.0;
         const seg2Geo = new THREE.ConeGeometry(0.05, seg2Length, 4);
         const seg2 = new THREE.Mesh(seg2Geo, limbMaterialRef.current);
@@ -294,7 +287,6 @@ const App = () => {
         seg1Wrapper.add(seg2Wrapper);
         seg2Wrapper.add(seg2);
 
-        // Edge
         const e2 = new THREE.EdgesGeometry(seg2Geo);
         const l2 = new THREE.LineSegments(e2, edgeMaterialRef.current);
         seg2.add(l2);
@@ -303,7 +295,6 @@ const App = () => {
     angles.forEach((angle, i) => createLimb(true, angle, i));
     angles.forEach((angle, i) => createLimb(false, angle, i + 4));
 
-    // Animation Loop
     const animate = () => {
       requestAnimationFrame(animate);
       if (controlsRef.current) controlsRef.current.update();
@@ -324,7 +315,6 @@ const App = () => {
   useEffect(() => {
     const palette = COLORS[theme];
     
-    // Update Scene Background
     if (sceneRef.current) {
       sceneRef.current.background = new THREE.Color(palette.bg);
       if (sceneRef.current.fog) {
@@ -332,17 +322,13 @@ const App = () => {
       }
     }
 
-    // Update Materials
     limbMaterialRef.current.color.setHex(palette.limb);
-    
-    // Highlight material keeps the limb color but enables red emissive
     highlightMaterialRef.current.color.setHex(palette.limb);
-    highlightMaterialRef.current.emissive.setHex(0xff0000);
+    highlightMaterialRef.current.emissive.setHex(theme === 'dark' ? 0xff3b30 : 0xff453a); // iOS Red
     
     jointMaterialRef.current.color.setHex(palette.joint);
     edgeMaterialRef.current.color.setHex(palette.edge);
 
-    // Update Lights
     if (lightsRef.current) {
       lightsRef.current.ambient.color.setHex(palette.ambient);
       lightsRef.current.directional.color.setHex(palette.directional);
@@ -350,7 +336,6 @@ const App = () => {
     }
   }, [theme]);
 
-  // Handle Resize
   const handleResize = useCallback(() => {
     if (cameraRef.current && rendererRef.current) {
       cameraRef.current.aspect = window.innerWidth / window.innerHeight;
@@ -387,14 +372,11 @@ const App = () => {
         
         previousPointerRef.current = { x: e.clientX, y: e.clientY };
         
-        // Deselect previous if any
         if (selectedMeshRef.current) {
-            // Revert material
             selectedMeshRef.current.material = limbMaterialRef.current;
         }
         
         selectedMeshRef.current = hit.object as THREE.Mesh;
-        // Apply Highlight Material
         selectedMeshRef.current.material = highlightMaterialRef.current;
         
         const wrapper = selectedMeshRef.current.parent;
@@ -404,7 +386,6 @@ const App = () => {
         
         e.stopPropagation(); 
     } else {
-        // Clicked Background
         if (selectedMeshRef.current) {
             selectedMeshRef.current.material = limbMaterialRef.current;
             selectedMeshRef.current = null;
@@ -430,27 +411,19 @@ const App = () => {
           const camera = cameraRef.current;
           if (!camera) return;
 
-          // Calculate Screen-Relative Rotation Axes
-          // Drag X (Horizontal) -> Rotate around Camera Up
-          // Drag Y (Vertical) -> Rotate around Camera Right
           const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
           const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
           
           const rotX = new THREE.Quaternion().setFromAxisAngle(camRight, deltaY * sensitivity);
           const rotY = new THREE.Quaternion().setFromAxisAngle(camUp, deltaX * sensitivity);
           
-          // Combined rotation in World Space
           const deltaQ = rotY.multiply(rotX);
           
-          // Apply to Object: 
-          // 1. Get current World Q
           const currentWorldQ = new THREE.Quaternion();
           wrapper.getWorldQuaternion(currentWorldQ);
           
-          // 2. Calculate New World Q
           const newWorldQ = deltaQ.multiply(currentWorldQ);
           
-          // 3. Convert to Local Q relative to parent
           const parent = wrapper.parent;
           const parentWorldQ = new THREE.Quaternion();
           if (parent) {
@@ -459,13 +432,11 @@ const App = () => {
           
           const newLocalQ = parentWorldQ.invert().multiply(newWorldQ);
           
-          // 4. Update Object
           wrapper.quaternion.copy(newLocalQ);
 
-          // 5. Snap Logic
           if (snapEnabled) {
               const euler = new THREE.Euler().setFromQuaternion(newLocalQ);
-              const snapStep = THREE.MathUtils.degToRad(15); // Snap to 15, 30, 45, 90...
+              const snapStep = THREE.MathUtils.degToRad(15); 
               
               euler.x = Math.round(euler.x / snapStep) * snapStep;
               euler.y = Math.round(euler.y / snapStep) * snapStep;
@@ -524,22 +495,8 @@ const App = () => {
       }
   };
 
-  // Helper styles based on theme
   const isDark = theme === 'dark';
-  const bgClass = isDark ? 'bg-black text-white' : 'bg-white text-black';
-  const panelClass = isDark ? 'bg-neutral-900/80 border-white/5' : 'bg-neutral-100/80 border-black/5';
-  
-  const getBtnClass = (active: boolean) => {
-    if (active) {
-        return isDark 
-          ? 'bg-neutral-800 border-white/20 text-white shadow-[0_0_15px_rgba(255,255,255,0.1)]'
-          : 'bg-black border-black text-white shadow-lg';
-    }
-    return isDark
-      ? 'bg-neutral-900/80 border-white/5 text-neutral-500'
-      : 'bg-neutral-100/80 border-black/5 text-neutral-400';
-  };
-  
+  const bgClass = isDark ? 'bg-black text-white' : 'bg-[#F2F2F7] text-black';
   const actionBtnClass = isDark 
     ? 'text-neutral-400 hover:text-white hover:bg-white/10'
     : 'text-neutral-500 hover:text-black hover:bg-black/5';
@@ -547,7 +504,7 @@ const App = () => {
   return (
     <div className={`relative w-full h-full overflow-hidden select-none transition-colors duration-500 ${bgClass}`}>
       <div 
-        className="w-full h-full touch-none"
+        className="absolute inset-0 z-0 touch-none"
         ref={mountRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -555,99 +512,58 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
 
-      {/* Floating Toggle */}
-      <div 
-        className={`absolute bottom-6 left-1/2 -translate-x-1/2 transition-all duration-500 z-50 ${
-          !menuOpen ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10 pointer-events-none"
-        }`}
-      >
-        <button 
-          onClick={() => setMenuOpen(true)}
-          className={`w-12 h-1.5 rounded-full backdrop-blur-md transition-colors ${
-              isDark ? 'bg-neutral-800/80 active:bg-white/50' : 'bg-black/10 active:bg-black/20'
-          }`}
-        />
-      </div>
+       {/* Safe Area Top Indicator for Selected Part - Fade In/Out */}
+       <div className={`absolute top-0 left-0 right-0 p-4 pt-[max(1.5rem,env(safe-area-inset-top))] flex justify-center pointer-events-none transition-opacity duration-300 z-40 ${selectedId ? 'opacity-100' : 'opacity-0'}`}>
+          <div className={`px-4 py-1.5 rounded-full backdrop-blur-xl text-[11px] font-semibold tracking-wide uppercase shadow-lg border ${
+             isDark ? 'bg-white/10 text-white border-white/10' : 'bg-white/70 text-black border-black/5'
+          }`}>
+             {selectedId ? selectedId.replace(/_/g, ' ').replace('limb', 'L').replace('joint', 'J') : ''}
+          </div>
+       </div>
 
-      {/* Bento Grid Menu */}
-      <div 
-        className={`absolute bottom-6 left-1/2 -translate-x-1/2 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] z-50 ${
-          menuOpen ? "scale-100 opacity-100 translate-y-0" : "scale-90 opacity-0 translate-y-8 pointer-events-none"
-        }`}
-      >
-        <div className="flex flex-col gap-2 w-[240px]">
-            {/* Row 1: Toggles */}
-            <div className="grid grid-cols-2 gap-2 h-16">
-                <button 
-                  onClick={() => setOrbitEnabled(!orbitEnabled)}
-                  className={`rounded-2xl flex flex-col items-center justify-center gap-1 transition-all active:scale-95 border ${getBtnClass(orbitEnabled)}`}
-                >
-                    <Eye className="w-6 h-6" />
-                    <span className="text-[10px] uppercase font-mono tracking-wider">Orbit</span>
-                </button>
-                <button 
-                  onClick={() => setPoseEnabled(!poseEnabled)}
-                  className={`rounded-2xl flex flex-col items-center justify-center gap-1 transition-all active:scale-95 border ${getBtnClass(poseEnabled)}`}
-                >
-                    <Hand className="w-6 h-6" />
-                    <span className="text-[10px] uppercase font-mono tracking-wider">Grab</span>
-                </button>
-            </div>
-
-            {/* Row 2: Actions & Snap */}
-            <div className="grid grid-cols-2 gap-2 h-14">
-                 {/* Action Group: Copy / Random / Reset */}
-                 <div className={`grid grid-cols-3 gap-0.5 backdrop-blur-xl rounded-2xl border p-1 ${panelClass}`}>
-                    <button 
-                        onClick={copyPose}
-                        className={`flex items-center justify-center rounded-lg active:scale-95 transition-all ${actionBtnClass}`}
-                        title="Copy"
-                    >
-                        {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                    </button>
-                    <button 
-                        onClick={randomizePose}
-                        className={`flex items-center justify-center rounded-lg active:scale-95 transition-all ${actionBtnClass}`}
-                        title="Randomize"
-                    >
-                        <Shuffle className="w-4 h-4" />
-                    </button>
-                    <button 
-                        onClick={resetPose}
-                        className={`flex items-center justify-center rounded-lg active:scale-95 transition-all ${actionBtnClass}`}
-                        title="Reset"
-                    >
-                        <RotateCcw className="w-4 h-4" />
-                    </button>
-                 </div>
-
-                 {/* Snap Toggle (Replaces old Reset location) */}
-                 <button 
-                    onClick={() => setSnapEnabled(!snapEnabled)}
-                    className={`rounded-2xl flex flex-col items-center justify-center gap-1 transition-all active:scale-95 border ${getBtnClass(snapEnabled)}`}
-                 >
-                    {/* Snap Icon: RotateCw symbol to imply rotation increment or Grid */}
-                    <RotateCw className="w-5 h-5" />
-                    <span className="text-[10px] uppercase font-mono tracking-wider">
-                        {snapEnabled ? 'Snap' : 'Free'}
-                    </span>
+       {/* Floating Dock Bottom */}
+       <div className="absolute bottom-6 left-0 right-0 flex justify-center z-50 pointer-events-none mb-[env(safe-area-inset-bottom)]">
+          <div className={`pointer-events-auto flex items-center gap-1 p-1.5 rounded-full backdrop-blur-2xl border shadow-2xl transition-all duration-300 ${
+              isDark ? 'bg-neutral-900/60 border-white/10 shadow-black/50' : 'bg-white/60 border-black/5 shadow-neutral-300/40'
+          }`}>
+             
+             {/* Mode Toggle */}
+             <div className="flex gap-1">
+                 <button onClick={() => { setOrbitEnabled(true); setPoseEnabled(false); }} 
+                   className={`p-3 rounded-full transition-all duration-300 ${orbitEnabled ? (isDark ? 'bg-white/20 text-white' : 'bg-white text-black shadow-sm') : 'text-neutral-500'}`}>
+                   <Eye size={20} strokeWidth={1.5} />
                  </button>
-            </div>
-
-            {/* Status Indicator */}
-             <div className="flex justify-center items-center gap-2 pt-1 opacity-50">
-                <div className={`w-1.5 h-1.5 rounded-full ${selectedId ? 'bg-red-500' : (isDark ? 'bg-neutral-600' : 'bg-neutral-300')}`} />
-                <span className={`text-[10px] font-mono uppercase tracking-wider ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                    {selectedId ? selectedId.split('_').slice(0,3).join(' ') : 'READY'}
-                </span>
+                 <button onClick={() => { setOrbitEnabled(false); setPoseEnabled(true); }}
+                   className={`p-3 rounded-full transition-all duration-300 ${poseEnabled ? (isDark ? 'bg-white/20 text-white' : 'bg-white text-black shadow-sm') : 'text-neutral-500'}`}>
+                   <Hand size={20} strokeWidth={1.5} />
+                 </button>
              </div>
 
-             {/* Close Handle */}
-            <div className="flex justify-center pt-2 w-full" onClick={() => setMenuOpen(false)}>
-                <div className={`w-10 h-1 rounded-full ${isDark ? 'bg-white/20' : 'bg-black/10'}`} />
-            </div>
-        </div>
-      </div>
+             <div className={`w-px h-6 mx-1 ${isDark ? 'bg-white/10' : 'bg-black/10'}`}></div>
+
+             {/* Actions */}
+             <button onClick={copyPose} className={`p-3 rounded-full transition-all duration-200 active:scale-90 ${actionBtnClass}`}>
+                 {copied ? <Check size={20} strokeWidth={2} className="text-green-500" /> : <Copy size={20} strokeWidth={1.5} />}
+             </button>
+             
+             <button onClick={randomizePose} className={`p-3 rounded-full transition-all duration-200 active:scale-90 ${actionBtnClass}`}>
+                 <Shuffle size={20} strokeWidth={1.5} />
+             </button>
+
+             <button onClick={resetPose} className={`p-3 rounded-full transition-all duration-200 active:scale-90 ${actionBtnClass}`}>
+                 <RotateCcw size={20} strokeWidth={1.5} />
+             </button>
+
+             <div className={`w-px h-6 mx-1 ${isDark ? 'bg-white/10' : 'bg-black/10'}`}></div>
+
+             {/* Snap Toggle */}
+             <button onClick={() => setSnapEnabled(!snapEnabled)} 
+                className={`p-3 rounded-full transition-all duration-300 ${snapEnabled ? (isDark ? 'bg-white/20 text-white' : 'bg-white text-black shadow-sm') : 'text-neutral-500'}`}>
+                <Grid3x3 size={20} strokeWidth={1.5} />
+             </button>
+
+          </div>
+       </div>
     </div>
   );
 };
