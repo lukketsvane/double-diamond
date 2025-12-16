@@ -166,6 +166,7 @@ const App = () => {
 
   // Material Refs for dynamic updates
   const limbMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
+  const highlightMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const jointMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const edgeMaterialRef = useRef<THREE.LineBasicMaterial>(new THREE.LineBasicMaterial());
   const lightsRef = useRef<{
@@ -227,6 +228,9 @@ const App = () => {
     limbMaterialRef.current.roughness = 0.5;
     limbMaterialRef.current.metalness = 0.5;
     
+    highlightMaterialRef.current.roughness = 0.5;
+    highlightMaterialRef.current.metalness = 0.5;
+    
     jointMaterialRef.current.roughness = 0.1;
     jointMaterialRef.current.metalness = 0.9;
 
@@ -239,9 +243,9 @@ const App = () => {
         pivotGroup.rotation.z = verticalAngle;
         creatureGroup.add(pivotGroup);
 
-        // Segment 1
+        // Segment 1 (Thinner: 0.2 -> 0.1)
         const seg1Length = 1.5;
-        const seg1Geo = new THREE.BoxGeometry(0.2, seg1Length, 0.2);
+        const seg1Geo = new THREE.BoxGeometry(0.1, seg1Length, 0.1);
         const seg1 = new THREE.Mesh(seg1Geo, limbMaterialRef.current);
         seg1.position.y = seg1Length / 2;
         seg1.userData = { isPart: true, partType: 'limb', limbIndex: index, segmentIndex: 1 };
@@ -261,13 +265,14 @@ const App = () => {
         const l1 = new THREE.LineSegments(e1, edgeMaterialRef.current);
         seg1.add(l1);
 
-        const joint = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 16), jointMaterialRef.current);
+        // Joint Sphere (1/4th size: 0.25 -> 0.0625)
+        const joint = new THREE.Mesh(new THREE.SphereGeometry(0.0625, 16, 16), jointMaterialRef.current);
         joint.position.y = seg1Length / 2;
         seg1.add(joint);
 
-        // Segment 2
+        // Segment 2 (Cone, half radius: 0.1 -> 0.05)
         const seg2Length = 2.0;
-        const seg2Geo = new THREE.ConeGeometry(0.1, seg2Length, 4);
+        const seg2Geo = new THREE.ConeGeometry(0.05, seg2Length, 4);
         const seg2 = new THREE.Mesh(seg2Geo, limbMaterialRef.current);
         seg2.position.y = seg2Length / 2;
         seg2.userData = { isPart: true, partType: 'limb', limbIndex: index, segmentIndex: 2 };
@@ -326,6 +331,11 @@ const App = () => {
 
     // Update Materials
     limbMaterialRef.current.color.setHex(palette.limb);
+    
+    // Highlight material keeps the limb color but enables red emissive
+    highlightMaterialRef.current.color.setHex(palette.limb);
+    highlightMaterialRef.current.emissive.setHex(0xff0000);
+    
     jointMaterialRef.current.color.setHex(palette.joint);
     edgeMaterialRef.current.color.setHex(palette.edge);
 
@@ -374,13 +384,15 @@ const App = () => {
         
         previousPointerRef.current = { x: e.clientX, y: e.clientY };
         
+        // Deselect previous if any
         if (selectedMeshRef.current) {
-            (selectedMeshRef.current.material as THREE.MeshStandardMaterial).emissive.setHex(0x000000);
+            // Revert material
+            selectedMeshRef.current.material = limbMaterialRef.current;
         }
         
         selectedMeshRef.current = hit.object as THREE.Mesh;
-        // Selection Highlight
-        (selectedMeshRef.current.material as THREE.MeshStandardMaterial).emissive.setHex(0xff0000);
+        // Apply Highlight Material (Swaps reference)
+        selectedMeshRef.current.material = highlightMaterialRef.current;
         
         const wrapper = selectedMeshRef.current.parent;
         if (wrapper && wrapper.userData.isJoint) {
@@ -389,8 +401,10 @@ const App = () => {
         
         e.stopPropagation(); 
     } else {
+        // Clicked Background
         if (selectedMeshRef.current) {
-            (selectedMeshRef.current.material as THREE.MeshStandardMaterial).emissive.setHex(0x000000);
+            // Revert material on deselect
+            selectedMeshRef.current.material = limbMaterialRef.current;
             selectedMeshRef.current = null;
             setSelectedId(null);
         }
