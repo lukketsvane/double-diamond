@@ -18,23 +18,18 @@ type PoseData = Record<string, {x: number, y: number, z: number}>;
 type ThemeMode = 'light' | 'dark';
 
 // --- Constants ---
+// "Closed Bud" Pose: Limbs curl back in to touch tips at the central axis
 const INITIAL_POSE: PoseData = {
-  "limb_0_joint_1": { "x": 0.624, "y": 0.246, "z": 0.98 },
-  "limb_0_joint_2": { "x": -2.976, "y": -0.537, "z": 1.043 },
-  "limb_1_joint_1": { "x": 0.092, "y": 0.593, "z": -2.637 },
-  "limb_1_joint_2": { "x": 0, "y": 0, "z": -2.094 },
-  "limb_2_joint_1": { "x": 0.648, "y": 0.194, "z": 0.598 },
-  "limb_2_joint_2": { "x": -1.714, "y": -0.542, "z": 1.568 },
-  "limb_3_joint_1": { "x": -1.424, "y": 0.01, "z": -1.274 },
-  "limb_3_joint_2": { "x": -1.379, "y": -0.446, "z": -3.134 },
-  "limb_4_joint_1": { "x": 0, "y": 0, "z": 0 },
-  "limb_4_joint_2": { "x": 0.251, "y": 0.378, "z": 1.425 },
-  "limb_5_joint_1": { "x": 0, "y": 0, "z": 0 },
-  "limb_5_joint_2": { "x": -0.3, "y": 0.13, "z": 1.522 },
-  "limb_6_joint_1": { "x": 0, "y": 0, "z": 0 },
-  "limb_6_joint_2": { "x": 0.796, "y": 0.142, "z": 1.507 },
-  "limb_7_joint_1": { "x": 2.923, "y": -0.704, "z": -2.115 },
-  "limb_7_joint_2": { "x": 0, "y": 0, "z": 2.094 }
+  // Upper Set (0-3) - Curling Inwards/Down
+  "limb_0_joint_1": { "x": 0.5, "y": 0, "z": 0 }, "limb_0_joint_2": { "x": -2.4, "y": 0, "z": 0 },
+  "limb_1_joint_1": { "x": 0.5, "y": 0, "z": 0 }, "limb_1_joint_2": { "x": -2.4, "y": 0, "z": 0 },
+  "limb_2_joint_1": { "x": 0.5, "y": 0, "z": 0 }, "limb_2_joint_2": { "x": -2.4, "y": 0, "z": 0 },
+  "limb_3_joint_1": { "x": 0.5, "y": 0, "z": 0 }, "limb_3_joint_2": { "x": -2.4, "y": 0, "z": 0 },
+  // Lower Set (4-7) - Mirrored Curling Inwards/Up
+  "limb_4_joint_1": { "x": -0.5, "y": 0, "z": 0 }, "limb_4_joint_2": { "x": 2.4, "y": 0, "z": 0 },
+  "limb_5_joint_1": { "x": -0.5, "y": 0, "z": 0 }, "limb_5_joint_2": { "x": 2.4, "y": 0, "z": 0 },
+  "limb_6_joint_1": { "x": -0.5, "y": 0, "z": 0 }, "limb_6_joint_2": { "x": 2.4, "y": 0, "z": 0 },
+  "limb_7_joint_1": { "x": -0.5, "y": 0, "z": 0 }, "limb_7_joint_2": { "x": 2.4, "y": 0, "z": 0 }
 };
 
 const COLORS = {
@@ -118,11 +113,6 @@ const App = () => {
   const highlightMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const jointMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const edgeMaterialRef = useRef<THREE.LineBasicMaterial>(new THREE.LineBasicMaterial());
-  const hitboxMaterialRef = useRef<THREE.MeshBasicMaterial>(new THREE.MeshBasicMaterial({ visible: false })); 
-  // Note: We use visible: false for hitboxes, but we will pass them to raycaster explicitly or rely on them being in scene? 
-  // ThreeJS raycaster respects visible=false if you don't filter. 
-  // Actually, Raycaster DOES NOT intersect visible:false objects by default.
-  // We need to use opacity: 0 and transparent: true instead.
   
   const invisibleMaterialRef = useRef<THREE.MeshBasicMaterial>(new THREE.MeshBasicMaterial({ 
       transparent: true, 
@@ -306,21 +296,74 @@ const App = () => {
       });
   };
 
+  // GENERATOR ALGORITHMS
   const generateRandomPose = () => {
-     const pose: PoseData = {};
-     for (let i = 0; i < 8; i++) {
-        pose[`limb_${i}_joint_1`] = { 
-            x: (Math.random() - 0.5) * 3, 
-            y: (Math.random() - 0.5) * 3, 
-            z: (Math.random() - 0.5) * 3 
-        };
-        pose[`limb_${i}_joint_2`] = { 
-            x: (Math.random() - 0.5) * 3, 
-            y: (Math.random() - 0.5) * 3, 
-            z: (Math.random() - 0.5) * 3 
-        };
-     }
-     if (creatureRef.current) applyPoseToRef(pose, creatureRef.current);
+     const strategies = [
+         // Strategy 1: STAR SYMMETRY (All limbs identical geometry, lower mirrored)
+         () => {
+             const j1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
+             const j2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
+             const pose: PoseData = {};
+             
+             // Top
+             for(let i=0; i<4; i++) {
+                 pose[`limb_${i}_joint_1`] = j1;
+                 pose[`limb_${i}_joint_2`] = j2;
+             }
+             // Bottom (Mirrored X and Z to maintain radial symmetry relative to their base)
+             // Or inverted X to close/open oppositely
+             for(let i=4; i<8; i++) {
+                 pose[`limb_${i}_joint_1`] = { x: -j1.x, y: j1.y, z: j1.z };
+                 pose[`limb_${i}_joint_2`] = { x: -j2.x, y: j2.y, z: j2.z };
+             }
+             return pose;
+         },
+         // Strategy 2: DUAL RING (Top ring is one shape, Bottom ring is another)
+         () => {
+             const t1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
+             const t2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
+             
+             const b1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
+             const b2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
+             
+             const pose: PoseData = {};
+             for(let i=0; i<4; i++) {
+                 pose[`limb_${i}_joint_1`] = t1;
+                 pose[`limb_${i}_joint_2`] = t2;
+             }
+             for(let i=4; i<8; i++) {
+                 pose[`limb_${i}_joint_1`] = b1;
+                 pose[`limb_${i}_joint_2`] = b2;
+             }
+             return pose;
+         },
+         // Strategy 3: GEAR (Alternating A-B-A-B patterns)
+         () => {
+             const a1 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
+             const a2 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
+             
+             const b1 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
+             const b2 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
+
+             const pose: PoseData = {};
+             for(let i=0; i<8; i++) {
+                 const isEven = i % 2 === 0;
+                 // Flip bottom ones for symmetry
+                 const flip = i >= 4 ? -1 : 1;
+                 
+                 const p1 = isEven ? a1 : b1;
+                 const p2 = isEven ? a2 : b2;
+                 
+                 pose[`limb_${i}_joint_1`] = { x: p1.x * flip, y: p1.y, z: p1.z };
+                 pose[`limb_${i}_joint_2`] = { x: p2.x * flip, y: p2.y, z: p2.z };
+             }
+             return pose;
+         }
+     ];
+
+     const strategy = strategies[Math.floor(Math.random() * strategies.length)];
+     const newPose = strategy();
+     if (creatureRef.current) applyPoseToRef(newPose, creatureRef.current);
   };
 
   const saveSnapshot = () => {
@@ -405,27 +448,6 @@ const App = () => {
 
       const wrapper = selectedMeshRef.current.parent;
       if (!wrapper || !wrapper.userData.isJoint) return;
-
-      // 1. REMOTE GRAB (Screen Space Rotation)
-      // Active if Grab=ON and Orbit=OFF (and we clicked background) 
-      // OR if we implement a specific Remote Grab override? 
-      // For simplicity, let's use lever drag for direct hits, and trackball for BG hits.
-      // We can check if we hit the object initially? 
-      // Actually, if we are dragging, we already decided mode in PointerDown.
-      
-      // If we are in "Background Drag" mode (Orbit=OFF, Grab=ON, clicked BG)
-      if (!orbitEnabled && grabEnabled && !raycasterRef.current.intersectObjects(creatureRef.current!.children, true).find(i => i.object.userData.isPart)) {
-           // Wait, Raycasting here is expensive on move? 
-           // Better to rely on state. But for now, let's just use the logic:
-           // If we are dragging and orbit is OFF, assume it's remote grab?
-           // Actually, we can just use the lever logic if we have a start vector, 
-           // but remote grab needs screen delta.
-           
-           // Simpler: If we started dragging in PointerDown, we set isDraggingRef.
-           // How do we distinguish Lever vs Remote? 
-           // Let's just use Lever if we have a valid dragStartVector, otherwise Remote?
-           // dragStartVector is set only when clicking a limb.
-      }
 
       // Check if we initialized Lever Drag (clicked a limb)
       const isLeverDrag = dragStartVectorRef.current.lengthSq() > 0.5; // It's normalized, so length 1
