@@ -19,12 +19,12 @@ type ThemeMode = 'light' | 'dark';
 
 // --- Constants ---
 const INITIAL_POSE: PoseData = {
-  "limb_0_joint_1": { "x": 1.015, "y": 0.648, "z": 0.123 },
+  "limb_0_joint_1": { "x": 0.624, "y": 0.246, "z": 0.98 },
   "limb_0_joint_2": { "x": -2.976, "y": -0.537, "z": 1.043 },
   "limb_1_joint_1": { "x": 0.092, "y": 0.593, "z": -2.637 },
   "limb_1_joint_2": { "x": 0, "y": 0, "z": -2.094 },
-  "limb_2_joint_1": { "x": 0.429, "y": 0.239, "z": 0.768 },
-  "limb_2_joint_2": { "x": 2.287, "y": -0.829, "z": 0.755 },
+  "limb_2_joint_1": { "x": 0.648, "y": 0.194, "z": 0.598 },
+  "limb_2_joint_2": { "x": -1.714, "y": -0.542, "z": 1.568 },
   "limb_3_joint_1": { "x": -1.424, "y": 0.01, "z": -1.274 },
   "limb_3_joint_2": { "x": -1.379, "y": -0.446, "z": -3.134 },
   "limb_4_joint_1": { "x": 0, "y": 0, "z": 0 },
@@ -512,57 +512,52 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
 
-       {/* Safe Area Top Indicator for Selected Part - Fade In/Out */}
-       <div className={`absolute top-0 left-0 right-0 p-4 pt-[max(1.5rem,env(safe-area-inset-top))] flex justify-center pointer-events-none transition-opacity duration-300 z-40 ${selectedId ? 'opacity-100' : 'opacity-0'}`}>
-          <div className={`px-4 py-1.5 rounded-full backdrop-blur-xl text-[11px] font-semibold tracking-wide uppercase shadow-lg border ${
-             isDark ? 'bg-white/10 text-white border-white/10' : 'bg-white/70 text-black border-black/5'
-          }`}>
-             {selectedId ? selectedId.replace(/_/g, ' ').replace('limb', 'L').replace('joint', 'J') : ''}
-          </div>
+       {/* Top Info Bar */}
+       <div className={`absolute top-0 left-0 right-0 p-4 pt-[max(1rem,env(safe-area-inset-top))] flex justify-between items-start pointer-events-none z-40`}>
+          <div className={`text-xs font-mono opacity-50`}>Mento 3D</div>
+          {selectedId && (
+            <div className={`px-2 py-1 rounded text-xs font-bold tracking-widest uppercase backdrop-blur-sm shadow-sm ${
+               isDark ? 'bg-white/10 text-white' : 'bg-white/50 text-black'
+            }`}>
+               {selectedId.replace(/_/g, ' ')}
+            </div>
+          )}
        </div>
 
-       {/* Floating Dock Bottom */}
-       <div className="absolute bottom-6 left-0 right-0 flex justify-center z-50 pointer-events-none mb-[env(safe-area-inset-bottom)]">
-          <div className={`pointer-events-auto flex items-center gap-1 p-1.5 rounded-full backdrop-blur-2xl border shadow-2xl transition-all duration-300 ${
-              isDark ? 'bg-neutral-900/60 border-white/10 shadow-black/50' : 'bg-white/60 border-black/5 shadow-neutral-300/40'
-          }`}>
-             
-             {/* Mode Toggle */}
-             <div className="flex gap-1">
-                 <button onClick={() => { setOrbitEnabled(true); setPoseEnabled(false); }} 
-                   className={`p-3 rounded-full transition-all duration-300 ${orbitEnabled ? (isDark ? 'bg-white/20 text-white' : 'bg-white text-black shadow-sm') : 'text-neutral-500'}`}>
-                   <Eye size={20} strokeWidth={1.5} />
-                 </button>
-                 <button onClick={() => { setOrbitEnabled(false); setPoseEnabled(true); }}
-                   className={`p-3 rounded-full transition-all duration-300 ${poseEnabled ? (isDark ? 'bg-white/20 text-white' : 'bg-white text-black shadow-sm') : 'text-neutral-500'}`}>
-                   <Hand size={20} strokeWidth={1.5} />
-                 </button>
-             </div>
+       {/* Bottom Toolbar - Standard Fixed Layout */}
+       <div className={`absolute bottom-0 left-0 right-0 pb-[env(safe-area-inset-bottom)] z-50 pointer-events-auto transition-colors duration-300 border-t backdrop-blur-md ${
+           isDark ? 'bg-neutral-900/80 border-white/10' : 'bg-white/80 border-black/10'
+       }`}>
+           <div className="flex justify-between items-center px-6 py-3">
+                {/* Left Group: Modes */}
+                <div className="flex gap-4">
+                    <button onClick={() => { setOrbitEnabled(true); setPoseEnabled(false); }} 
+                      className={`p-2 transition-colors ${orbitEnabled ? (isDark ? 'text-white' : 'text-black') : 'text-neutral-400'}`}>
+                      <Eye size={24} strokeWidth={1.5} />
+                    </button>
+                    <button onClick={() => { setOrbitEnabled(false); setPoseEnabled(true); }}
+                      className={`p-2 transition-colors ${poseEnabled ? (isDark ? 'text-white' : 'text-black') : 'text-neutral-400'}`}>
+                      <Hand size={24} strokeWidth={1.5} />
+                    </button>
+                </div>
 
-             <div className={`w-px h-6 mx-1 ${isDark ? 'bg-white/10' : 'bg-black/10'}`}></div>
-
-             {/* Actions */}
-             <button onClick={copyPose} className={`p-3 rounded-full transition-all duration-200 active:scale-90 ${actionBtnClass}`}>
-                 {copied ? <Check size={20} strokeWidth={2} className="text-green-500" /> : <Copy size={20} strokeWidth={1.5} />}
-             </button>
-             
-             <button onClick={randomizePose} className={`p-3 rounded-full transition-all duration-200 active:scale-90 ${actionBtnClass}`}>
-                 <Shuffle size={20} strokeWidth={1.5} />
-             </button>
-
-             <button onClick={resetPose} className={`p-3 rounded-full transition-all duration-200 active:scale-90 ${actionBtnClass}`}>
-                 <RotateCcw size={20} strokeWidth={1.5} />
-             </button>
-
-             <div className={`w-px h-6 mx-1 ${isDark ? 'bg-white/10' : 'bg-black/10'}`}></div>
-
-             {/* Snap Toggle */}
-             <button onClick={() => setSnapEnabled(!snapEnabled)} 
-                className={`p-3 rounded-full transition-all duration-300 ${snapEnabled ? (isDark ? 'bg-white/20 text-white' : 'bg-white text-black shadow-sm') : 'text-neutral-500'}`}>
-                <Grid3x3 size={20} strokeWidth={1.5} />
-             </button>
-
-          </div>
+                {/* Right Group: Actions */}
+                <div className="flex gap-4">
+                    <button onClick={copyPose} className={`p-2 active:opacity-50 ${actionBtnClass}`}>
+                        {copied ? <Check size={24} className="text-green-500" /> : <Copy size={24} strokeWidth={1.5} />}
+                    </button>
+                    <button onClick={randomizePose} className={`p-2 active:opacity-50 ${actionBtnClass}`}>
+                        <Shuffle size={24} strokeWidth={1.5} />
+                    </button>
+                    <button onClick={resetPose} className={`p-2 active:opacity-50 ${actionBtnClass}`}>
+                        <RotateCcw size={24} strokeWidth={1.5} />
+                    </button>
+                    <button onClick={() => setSnapEnabled(!snapEnabled)} 
+                       className={`p-2 transition-colors ${snapEnabled ? (isDark ? 'text-white' : 'text-black') : 'text-neutral-400'}`}>
+                       <Grid3x3 size={24} strokeWidth={1.5} />
+                    </button>
+                </div>
+           </div>
        </div>
     </div>
   );
