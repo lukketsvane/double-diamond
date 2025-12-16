@@ -16,7 +16,6 @@ import {
 // --- Types ---
 type PoseData = Record<string, {x: number, y: number, z: number}>;
 type ThemeMode = 'light' | 'dark';
-type AppMode = 'orbit' | 'grab' | 'free';
 
 // --- Constants ---
 const INITIAL_POSE: PoseData = {
@@ -91,7 +90,10 @@ const App = () => {
   // State
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [mode, setMode] = useState<AppMode>('free');
+  
+  // Independent Mode Toggles
+  const [orbitEnabled, setOrbitEnabled] = useState(true);
+  const [grabEnabled, setGrabEnabled] = useState(true);
 
   // Refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -116,6 +118,18 @@ const App = () => {
   const highlightMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const jointMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const edgeMaterialRef = useRef<THREE.LineBasicMaterial>(new THREE.LineBasicMaterial());
+  const hitboxMaterialRef = useRef<THREE.MeshBasicMaterial>(new THREE.MeshBasicMaterial({ visible: false })); 
+  // Note: We use visible: false for hitboxes, but we will pass them to raycaster explicitly or rely on them being in scene? 
+  // ThreeJS raycaster respects visible=false if you don't filter. 
+  // Actually, Raycaster DOES NOT intersect visible:false objects by default.
+  // We need to use opacity: 0 and transparent: true instead.
+  
+  const invisibleMaterialRef = useRef<THREE.MeshBasicMaterial>(new THREE.MeshBasicMaterial({ 
+      transparent: true, 
+      opacity: 0,
+      depthWrite: false 
+  }));
+
   const lightsRef = useRef<{
     ambient: THREE.AmbientLight;
     directional: THREE.DirectionalLight;
@@ -140,7 +154,7 @@ const App = () => {
     const renderer = new THREE.WebGLRenderer({ 
         antialias: true, 
         alpha: false,
-        preserveDrawingBuffer: true // Required for screenshot
+        preserveDrawingBuffer: true
     });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -194,16 +208,25 @@ const App = () => {
         creatureGroup.add(pivotGroup);
 
         const seg1Length = 1.5;
-        // Thinner geometry
+        
+        // 1. Visual Mesh
         const seg1Geo = new THREE.BoxGeometry(0.04, seg1Length, 0.04);
         const seg1 = new THREE.Mesh(seg1Geo, limbMaterialRef.current);
         seg1.position.y = seg1Length / 2;
-        seg1.userData = { isPart: true, partType: 'limb', limbIndex: index, segmentIndex: 1 };
+        seg1.name = "visual";
         
+        // 2. Hitbox Mesh (Thicker)
+        const seg1HitboxGeo = new THREE.BoxGeometry(0.25, seg1Length, 0.25);
+        const seg1Hitbox = new THREE.Mesh(seg1HitboxGeo, invisibleMaterialRef.current);
+        seg1Hitbox.position.y = seg1Length / 2;
+        seg1Hitbox.userData = { isPart: true, isHitbox: true, limbIndex: index, segmentIndex: 1 };
+        seg1Hitbox.name = "hitbox";
+
         const seg1Wrapper = new THREE.Group();
         seg1Wrapper.userData = { isJoint: true, id: `limb_${index}_joint_1` };
         
         seg1Wrapper.add(seg1);
+        seg1Wrapper.add(seg1Hitbox); // Add hitbox as sibling to visual
         pivotGroup.add(seg1Wrapper);
         
         const e1 = new THREE.EdgesGeometry(seg1Geo);
@@ -215,17 +238,27 @@ const App = () => {
         seg1.add(joint);
 
         const seg2Length = 2.0;
+        
+        // 3. Segment 2 Visual
         const seg2Geo = new THREE.ConeGeometry(0.02, seg2Length, 4);
         const seg2 = new THREE.Mesh(seg2Geo, limbMaterialRef.current);
         seg2.position.y = seg2Length / 2;
-        seg2.userData = { isPart: true, partType: 'limb', limbIndex: index, segmentIndex: 2 };
+        seg2.name = "visual";
+
+        // 4. Segment 2 Hitbox
+        const seg2HitboxGeo = new THREE.ConeGeometry(0.25, seg2Length, 4);
+        const seg2Hitbox = new THREE.Mesh(seg2HitboxGeo, invisibleMaterialRef.current);
+        seg2Hitbox.position.y = seg2Length / 2;
+        seg2Hitbox.userData = { isPart: true, isHitbox: true, limbIndex: index, segmentIndex: 2 };
+        seg2Hitbox.name = "hitbox";
 
         const seg2Wrapper = new THREE.Group();
         seg2Wrapper.userData = { isJoint: true, id: `limb_${index}_joint_2` };
         seg2Wrapper.position.y = seg1Length; 
 
-        seg1Wrapper.add(seg2Wrapper);
         seg2Wrapper.add(seg2);
+        seg2Wrapper.add(seg2Hitbox);
+        seg1Wrapper.add(seg2Wrapper);
 
         const e2 = new THREE.EdgesGeometry(seg2Geo);
         const l2 = new THREE.LineSegments(e2, edgeMaterialRef.current);
@@ -302,7 +335,6 @@ const App = () => {
 
   // --- Interactions ---
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Basic Raycast setup
     const rect = rendererRef.current!.domElement.getBoundingClientRect();
     mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -310,46 +342,25 @@ const App = () => {
     
     // Check intersection
     const intersects = raycasterRef.current.intersectObjects(creatureRef.current!.children, true);
+    // Find closest hit that is a part (hitbox or visual)
     const hit = intersects.find(i => i.object.userData.isPart);
 
-    // Initial Pointer Track
     previousPointerRef.current = { x: e.clientX, y: e.clientY };
 
-    // --- LOGIC BRANCHING ---
-
-    // 1. ORBIT MODE: Always orbit, but allow selecting.
-    if (mode === 'orbit') {
-        if (hit) selectJoint(hit.object as THREE.Mesh);
-        // Controls handle orbit automatically
-        return; 
-    }
-
-    // 2. GRAB MODE: Dragging rotates selected joint (Remote Control).
-    if (mode === 'grab') {
-        if (hit) {
-            selectJoint(hit.object as THREE.Mesh);
-            isDraggingRef.current = true;
-            if (controlsRef.current) controlsRef.current.enabled = false;
-        } else if (selectedId) {
-            // Dragging background while something selected -> Remote Rotate
-            isDraggingRef.current = true;
-            if (controlsRef.current) controlsRef.current.enabled = false;
-        }
-        return;
-    }
-
-    // 3. FREE MODE: Smart Interaction (Lever Drag or Orbit).
-    if (mode === 'free') {
-        if (hit) {
-            // Start Lever Drag
-            const mesh = hit.object as THREE.Mesh;
-            selectJoint(mesh);
-            isDraggingRef.current = true;
-            if (controlsRef.current) controlsRef.current.enabled = false;
-            
-            // Setup Drag Plane
-            const wrapper = mesh.parent;
-            if (wrapper) {
+    // --- LOGIC ---
+    if (hit) {
+        // We hit a limb
+        if (grabEnabled) {
+             // Drag mode active
+             isDraggingRef.current = true;
+             if (controlsRef.current) controlsRef.current.enabled = false;
+             
+             // Select logic
+             selectJoint(hit.object as THREE.Mesh);
+             
+             // Prepare Lever Drag
+             const wrapper = hit.object.parent; // Joint Wrapper
+             if (wrapper) {
                const jointWorldPos = new THREE.Vector3();
                wrapper.getWorldPosition(jointWorldPos);
                jointWorldPosRef.current.copy(jointWorldPos);
@@ -366,10 +377,25 @@ const App = () => {
                    dragStartVectorRef.current.subVectors(planeIntersect, jointWorldPos).normalize();
                }
             }
+        } else {
+            // Grab disabled: Just select, maybe orbit if enabled
+            selectJoint(hit.object as THREE.Mesh);
+            // If orbit is enabled, orbit controls work by default (we don't disable them)
         }
-        // Else Orbit (handled by controls)
+    } else {
+        // Hit Background
+        if (!orbitEnabled && grabEnabled) {
+            // Remote Control Mode: Dragging BG rotates selected limb
+            // if something is selected
+            if (selectedId) {
+                isDraggingRef.current = true;
+                if (controlsRef.current) controlsRef.current.enabled = false;
+            }
+        } else if (orbitEnabled) {
+             // Standard orbit (OrbitControls handles this)
+        }
     }
-    
+
     e.stopPropagation();
   };
 
@@ -380,34 +406,32 @@ const App = () => {
       const wrapper = selectedMeshRef.current.parent;
       if (!wrapper || !wrapper.userData.isJoint) return;
 
-      // GRAB MODE: Screen Space Rotation (Trackball style)
-      if (mode === 'grab') {
-          const deltaX = e.clientX - previousPointerRef.current.x;
-          const deltaY = e.clientY - previousPointerRef.current.y;
-          previousPointerRef.current = { x: e.clientX, y: e.clientY };
-
-          const sensitivity = 0.005;
-          const cam = cameraRef.current!;
-          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-
-          const rotX = new THREE.Quaternion().setFromAxisAngle(camRight, deltaY * sensitivity);
-          const rotY = new THREE.Quaternion().setFromAxisAngle(camUp, deltaX * sensitivity);
-          const deltaQ = rotY.multiply(rotX);
-          
-          const currentWorldQ = new THREE.Quaternion();
-          wrapper.getWorldQuaternion(currentWorldQ);
-          const newWorldQ = deltaQ.multiply(currentWorldQ);
-          
-          const parent = wrapper.parent;
-          const parentWorldQ = new THREE.Quaternion();
-          if (parent) parent.getWorldQuaternion(parentWorldQ);
-          wrapper.quaternion.copy(parentWorldQ.invert().multiply(newWorldQ));
-          return;
+      // 1. REMOTE GRAB (Screen Space Rotation)
+      // Active if Grab=ON and Orbit=OFF (and we clicked background) 
+      // OR if we implement a specific Remote Grab override? 
+      // For simplicity, let's use lever drag for direct hits, and trackball for BG hits.
+      // We can check if we hit the object initially? 
+      // Actually, if we are dragging, we already decided mode in PointerDown.
+      
+      // If we are in "Background Drag" mode (Orbit=OFF, Grab=ON, clicked BG)
+      if (!orbitEnabled && grabEnabled && !raycasterRef.current.intersectObjects(creatureRef.current!.children, true).find(i => i.object.userData.isPart)) {
+           // Wait, Raycasting here is expensive on move? 
+           // Better to rely on state. But for now, let's just use the logic:
+           // If we are dragging and orbit is OFF, assume it's remote grab?
+           // Actually, we can just use the lever logic if we have a start vector, 
+           // but remote grab needs screen delta.
+           
+           // Simpler: If we started dragging in PointerDown, we set isDraggingRef.
+           // How do we distinguish Lever vs Remote? 
+           // Let's just use Lever if we have a valid dragStartVector, otherwise Remote?
+           // dragStartVector is set only when clicking a limb.
       }
 
-      // FREE MODE: Lever Drag
-      if (mode === 'free') {
+      // Check if we initialized Lever Drag (clicked a limb)
+      const isLeverDrag = dragStartVectorRef.current.lengthSq() > 0.5; // It's normalized, so length 1
+
+      if (isLeverDrag) {
+          // LEVER DRAG
           const rect = rendererRef.current!.domElement.getBoundingClientRect();
           const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
           const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -434,20 +458,66 @@ const App = () => {
               
               dragStartVectorRef.current.copy(currentVector);
           }
+      } else {
+          // REMOTE TRACKBALL DRAG (Background click with Orbit OFF)
+          const deltaX = e.clientX - previousPointerRef.current.x;
+          const deltaY = e.clientY - previousPointerRef.current.y;
+          previousPointerRef.current = { x: e.clientX, y: e.clientY };
+
+          const sensitivity = 0.005;
+          const cam = cameraRef.current!;
+          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+
+          const rotX = new THREE.Quaternion().setFromAxisAngle(camRight, deltaY * sensitivity);
+          const rotY = new THREE.Quaternion().setFromAxisAngle(camUp, deltaX * sensitivity);
+          const deltaQ = rotY.multiply(rotX);
+          
+          const currentWorldQ = new THREE.Quaternion();
+          wrapper.getWorldQuaternion(currentWorldQ);
+          const newWorldQ = deltaQ.multiply(currentWorldQ);
+          
+          const parent = wrapper.parent;
+          const parentWorldQ = new THREE.Quaternion();
+          if (parent) parent.getWorldQuaternion(parentWorldQ);
+          wrapper.quaternion.copy(parentWorldQ.invert().multiply(newWorldQ));
       }
   };
 
   const handlePointerUp = () => {
       isDraggingRef.current = false;
-      if (controlsRef.current) controlsRef.current.enabled = true;
+      dragStartVectorRef.current.set(0,0,0); // Reset drag type
+      
+      // Update orbit control state based on toggle
+      if (controlsRef.current) {
+          controlsRef.current.enabled = orbitEnabled;
+      }
   };
+  
+  // Ensure controls are updated when toggles change
+  useEffect(() => {
+      if (controlsRef.current) {
+          controlsRef.current.enabled = orbitEnabled;
+      }
+  }, [orbitEnabled]);
 
   const selectJoint = (mesh: THREE.Mesh) => {
+      // If we clicked a hitbox, find the visual sibling
+      let visualMesh = mesh;
+      if (mesh.userData.isHitbox) {
+          const parent = mesh.parent;
+          if (parent) {
+             const found = parent.children.find(c => c.name === "visual") as THREE.Mesh;
+             if (found) visualMesh = found;
+          }
+      }
+
       if (selectedMeshRef.current) selectedMeshRef.current.material = limbMaterialRef.current;
-      selectedMeshRef.current = mesh;
+      selectedMeshRef.current = visualMesh;
       selectedMeshRef.current.material = highlightMaterialRef.current;
-      if (mesh.parent && mesh.parent.userData.isJoint) {
-          setSelectedId(mesh.parent.userData.id);
+      
+      if (visualMesh.parent && visualMesh.parent.userData.isJoint) {
+          setSelectedId(visualMesh.parent.userData.id);
       }
   };
 
@@ -554,13 +624,13 @@ const App = () => {
        {/* Main Control Cluster */}
        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col gap-3 w-72 z-50">
             
-            {/* 1. Mode Toggles */}
+            {/* 1. Toggle Buttons */}
             <div className="grid grid-cols-2 gap-3 h-16">
-                 <button onClick={() => setMode('orbit')} className={primaryBtnClass(mode === 'orbit')}>
+                 <button onClick={() => setOrbitEnabled(!orbitEnabled)} className={primaryBtnClass(orbitEnabled)}>
                     <Eye size={18} strokeWidth={2.5} />
                     <span>Orbit</span>
                  </button>
-                 <button onClick={() => setMode('grab')} className={primaryBtnClass(mode === 'grab')}>
+                 <button onClick={() => setGrabEnabled(!grabEnabled)} className={primaryBtnClass(grabEnabled)}>
                     <Hand size={18} strokeWidth={2.5} />
                     <span>Grab</span>
                  </button>
@@ -580,7 +650,7 @@ const App = () => {
                       </button>
                  </div>
                  
-                 <button onClick={() => setMode('free')} className={`${primaryBtnClass(mode === 'free')} !px-0`}>
+                 <button onClick={() => { setOrbitEnabled(true); setGrabEnabled(true); }} className={`${primaryBtnClass(orbitEnabled && grabEnabled)} !px-0`}>
                     <Grid3x3 size={18} strokeWidth={2.5} />
                     <span>Free</span>
                  </button>
