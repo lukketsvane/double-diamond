@@ -41,21 +41,21 @@ const INITIAL_POSE: PoseData = {
   "limb_7_joint_2": { "x": 0, "y": 0, "z": 1.57 }
 };
 
-// Generate labels for every segment of every limb
-// Limbs 0-3 (Top): Inner(J1)=Define, Outer(J2)=Discover
-// Limbs 4-7 (Bottom): Inner(J1)=Develop, Outer(J2)=Deploy
+// Generate labels: Smarter, less cluttered logic.
+// Only label the "corner" limbs (0, 3 for top; 4, 7 for bottom) to reduce density.
 const generateLabels = () => {
     const labels = [];
-    // Top Limbs
-    for(let i=0; i<4; i++) {
-        labels.push({ text: "define", limbIndex: i, jointIndex: 1 });
-        labels.push({ text: "discover", limbIndex: i, jointIndex: 2 });
-    }
-    // Bottom Limbs
-    for(let i=4; i<8; i++) {
-        labels.push({ text: "develop", limbIndex: i, jointIndex: 1 });
-        labels.push({ text: "deploy", limbIndex: i, jointIndex: 2 });
-    }
+    const representativeLimbs = [0, 3, 4, 7]; // Only label 4 out of 8 limbs to keep it clean
+
+    representativeLimbs.forEach(i => {
+        if (i < 4) { // Top Limbs
+            labels.push({ text: "define", limbIndex: i, jointIndex: 1 });
+            labels.push({ text: "discover", limbIndex: i, jointIndex: 2 });
+        } else { // Bottom Limbs
+            labels.push({ text: "develop", limbIndex: i, jointIndex: 1 });
+            labels.push({ text: "deploy", limbIndex: i, jointIndex: 2 });
+        }
+    });
     return labels;
 };
 const INDIVIDUAL_LABELS = generateLabels();
@@ -64,7 +64,7 @@ const COLORS = {
   light: {
     bg: 0xf2f2f7,
     fog: 0xf2f2f7,
-    limb: 0x1c1c1e,
+    limb: 0x000000, // Black figure
     joint: 0x000000,
     edge: 0xaeaeb2,
     ambient: 0xffffff,
@@ -203,7 +203,7 @@ const App = () => {
         0.1,
         1000
     );
-    // CRITICAL FIX: Camera must be close enough (z=20) so fog doesn't obscure everything
+    // Camera must be close enough so fog doesn't obscure everything
     camera.position.set(0, 0, 20);
     camera.zoom = 1;
     camera.updateProjectionMatrix();
@@ -262,8 +262,8 @@ const App = () => {
         creatureGroup.add(pivotGroup);
 
         const seg1Length = 1.5;
-        // Increased thickness for better visibility
-        const thickness = 0.08; 
+        // Skinny legs
+        const thickness = 0.05; 
         
         const seg1BaseGeo = new THREE.BoxGeometry(thickness, seg1Length, thickness, 3, 12, 3);
         const seg1Geo = createWobblyGeometry(seg1BaseGeo, 0.02);
@@ -756,12 +756,12 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
       
-      {/* 3D Labels Layer - Now Individual for each limb segment */}
+      {/* 3D Labels Layer - Now with "Reenie Beanie" font and reduced size */}
       {!isCanvasMode && INDIVIDUAL_LABELS.map((item, i) => (
           <div 
              key={`${item.limbIndex}-${item.jointIndex}`}
              ref={el => labelRefs.current[i] = el}
-             className={`absolute top-0 left-0 text-xs font-bold uppercase tracking-wider pointer-events-none transition-all duration-300 ${isDark ? 'text-white/60' : 'text-black/60'}`}
+             className={`absolute top-0 left-0 text-[10px] md:text-xs font-hand leading-none pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`}
              style={{ opacity: 0 }} 
           >
               {item.text}
