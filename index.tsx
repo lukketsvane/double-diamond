@@ -203,7 +203,8 @@ const App = () => {
         0.1,
         1000
     );
-    camera.position.set(0, 0, 100);
+    // CRITICAL FIX: Camera must be close enough (z=20) so fog doesn't obscure everything
+    camera.position.set(0, 0, 20);
     camera.zoom = 1;
     camera.updateProjectionMatrix();
     cameraRef.current = camera;
@@ -261,14 +262,16 @@ const App = () => {
         creatureGroup.add(pivotGroup);
 
         const seg1Length = 1.5;
+        // Increased thickness for better visibility
+        const thickness = 0.08; 
         
-        const seg1BaseGeo = new THREE.BoxGeometry(0.04, seg1Length, 0.04, 3, 12, 3);
+        const seg1BaseGeo = new THREE.BoxGeometry(thickness, seg1Length, thickness, 3, 12, 3);
         const seg1Geo = createWobblyGeometry(seg1BaseGeo, 0.02);
         const seg1 = new THREE.Mesh(seg1Geo, limbMaterialRef.current);
         seg1.position.y = seg1Length / 2;
         seg1.name = "visual";
         
-        const seg1HitboxGeo = new THREE.BoxGeometry(0.25, seg1Length, 0.25);
+        const seg1HitboxGeo = new THREE.BoxGeometry(0.3, seg1Length, 0.3);
         const seg1Hitbox = new THREE.Mesh(seg1HitboxGeo, invisibleMaterialRef.current);
         seg1Hitbox.position.y = seg1Length / 2;
         seg1Hitbox.userData = { isPart: true, isHitbox: true, limbIndex: index, segmentIndex: 1 };
@@ -282,19 +285,19 @@ const App = () => {
         seg1Wrapper.add(seg1Hitbox); 
         pivotGroup.add(seg1Wrapper);
 
-        const joint = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 8), jointMaterialRef.current);
+        const joint = new THREE.Mesh(new THREE.SphereGeometry(thickness * 0.8, 12, 12), jointMaterialRef.current);
         joint.position.y = seg1Length / 2;
         seg1.add(joint);
 
         const seg2Length = 2.0;
         
-        const seg2BaseGeo = new THREE.ConeGeometry(0.02, seg2Length, 6, 12);
+        const seg2BaseGeo = new THREE.ConeGeometry(thickness * 0.6, seg2Length, 6, 12);
         const seg2Geo = createWobblyGeometry(seg2BaseGeo, 0.02);
         const seg2 = new THREE.Mesh(seg2Geo, limbMaterialRef.current);
         seg2.position.y = seg2Length / 2;
         seg2.name = "visual";
 
-        const seg2HitboxGeo = new THREE.ConeGeometry(0.25, seg2Length, 4);
+        const seg2HitboxGeo = new THREE.ConeGeometry(0.3, seg2Length, 4);
         const seg2Hitbox = new THREE.Mesh(seg2HitboxGeo, invisibleMaterialRef.current);
         seg2Hitbox.position.y = seg2Length / 2;
         seg2Hitbox.userData = { isPart: true, isHitbox: true, limbIndex: index, segmentIndex: 2 };
