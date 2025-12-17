@@ -16,7 +16,8 @@ import {
   Trash2,
   Grid3X3,
   Moon,
-  Sun
+  Sun,
+  Tag
 } from "lucide-react";
 
 // --- Types ---
@@ -32,6 +33,7 @@ type Stroke = {
 const LIMB_SEGMENT_1_LENGTH = 1.5;
 const LIMB_SEGMENT_2_LENGTH = 2.0;
 const SNAP_THRESHOLD = 0.5; // World units
+const SNAP_ANGLE = Math.PI / 12; // 15 degrees
 
 const INITIAL_POSE: PoseData = {
   "limb_0_joint_1": { "x": -0.102, "y": 0.062, "z": 1.451 },
@@ -152,6 +154,7 @@ const App = () => {
   
   const [orbitEnabled, setOrbitEnabled] = useState(true);
   const [grabEnabled, setGrabEnabled] = useState(true);
+  const [snapEnabled, setSnapEnabled] = useState(false);
   
   const [userPresets, setUserPresets] = useState<PoseData[]>([]);
 
@@ -363,7 +366,7 @@ const App = () => {
       mountRef.current?.removeChild(renderer.domElement);
       renderer.dispose();
     };
-  }, []); // Remove dependency on showLabels to prevent re-init. Colors handled by effect.
+  }, []);
 
   const updateLabels = (creatureGroup: THREE.Group) => {
     if (isCanvasMode) return;
@@ -428,7 +431,7 @@ const App = () => {
 
   const snapToGrid = () => {
     if (!creatureRef.current) return;
-    const STEP = Math.PI / 12; // 15 degrees
+    const STEP = SNAP_ANGLE;
     creatureRef.current.traverse((obj) => {
         if (obj.userData.isJoint) {
             const { x, y, z } = obj.rotation;
@@ -437,6 +440,10 @@ const App = () => {
         }
     });
   };
+
+  useEffect(() => {
+    if (snapEnabled) snapToGrid();
+  }, [snapEnabled]);
 
   const saveSnapshot = () => {
       if (rendererRef.current) {
@@ -583,7 +590,17 @@ const App = () => {
           parent.worldToLocal(localPoint);
           const dir = localPoint.normalize();
           const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
-          object.quaternion.copy(q);
+          
+          if (snapEnabled) {
+              const euler = new THREE.Euler().setFromQuaternion(q);
+              const STEP = SNAP_ANGLE;
+              euler.x = Math.round(euler.x / STEP) * STEP;
+              euler.y = Math.round(euler.y / STEP) * STEP;
+              euler.z = Math.round(euler.z / STEP) * STEP;
+              object.quaternion.setFromEuler(euler);
+          } else {
+              object.quaternion.copy(q);
+          }
       }
   };
 
@@ -916,16 +933,21 @@ const App = () => {
             <div className="flex items-center gap-3 pointer-events-auto">
                  <button 
                      onClick={() => setOrbitEnabled(!orbitEnabled)} 
-                     onDoubleClick={(e) => { e.stopPropagation(); setShowLabels(prev => !prev); }}
                      className={iconBtnClass(orbitEnabled)}
                  >
                     <Eye size={16} strokeWidth={2} />
+                 </button>
+                 <button 
+                     onClick={() => setShowLabels(!showLabels)} 
+                     className={iconBtnClass(showLabels)}
+                 >
+                    <Tag size={16} strokeWidth={2} />
                  </button>
                  <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}><Hand size={16} strokeWidth={2} /></button>
                  <button onClick={toggleTheme} className={iconBtnClass(false)}>
                     {isDark ? <Moon size={16} strokeWidth={2} /> : <Sun size={16} strokeWidth={2} />}
                  </button>
-                 <button onClick={snapToGrid} className={iconBtnClass(false)}><Grid3X3 size={16} strokeWidth={2} /></button>
+                 <button onClick={() => setSnapEnabled(!snapEnabled)} className={iconBtnClass(snapEnabled)}><Grid3X3 size={16} strokeWidth={2} /></button>
                  <div className="w-px h-5 bg-current opacity-20 mx-0.5"></div>
                  <button onClick={() => { setIsCanvasMode(true); setStrokeCount(0); strokesRef.current = []; }} className={iconBtnClass(false)}><Pencil size={16} strokeWidth={2} /></button>
             </div>
