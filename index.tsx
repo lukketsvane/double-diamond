@@ -22,23 +22,26 @@ type PoseData = Record<string, {x: number, y: number, z: number}>;
 type ThemeMode = 'light' | 'dark';
 
 // --- Constants ---
+// Perfect Angles: Symmetrical Diamond Shape
+// J1 at 0 uses the structural 45deg slope defined in geometry construction.
+// J2 at ~1.57 (90deg) bends the tip back inwards to form the diamond shape.
 const INITIAL_POSE: PoseData = {
-  "limb_0_joint_1": { "x": -1.251, "y": -0.204, "z": -0.921 },
-  "limb_0_joint_2": { "x": 1.357, "y": 0.146, "z": -0.555 },
-  "limb_1_joint_1": { "x": -1.251, "y": -0.204, "z": -0.921 },
-  "limb_1_joint_2": { "x": 1.217, "y": 0.065, "z": -0.537 },
-  "limb_2_joint_1": { "x": -1.416, "y": -0.435, "z": -0.573 },
-  "limb_2_joint_2": { "x": 0.818, "y": -0.307, "z": -1.242 },
-  "limb_3_joint_1": { "x": -1.378, "y": -0.293, "z": -0.785 },
-  "limb_3_joint_2": { "x": 1.524, "y": 0.121, "z": -0.978 },
-  "limb_4_joint_1": { "x": 1.312, "y": -0.273, "z": -1.036 },
-  "limb_4_joint_2": { "x": 0.662, "y": -0.659, "z": -0.984 },
-  "limb_5_joint_1": { "x": 1.299, "y": -0.281, "z": -1.034 },
-  "limb_5_joint_2": { "x": -0.309, "y": -0.72, "z": -1.877 },
-  "limb_6_joint_1": { "x": 1.314, "y": -0.282, "z": -1.048 },
-  "limb_6_joint_2": { "x": 0.884, "y": -0.305, "z": -1.031 },
-  "limb_7_joint_1": { "x": 1.251, "y": -0.204, "z": -0.921 },
-  "limb_7_joint_2": { "x": 2.418, "y": 0.4, "z": -1.043 }
+  "limb_0_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_0_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_1_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_1_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_2_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_2_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_3_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_3_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_4_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_4_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_5_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_5_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_6_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_6_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_7_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_7_joint_2": { "x": 0, "y": 0, "z": 1.57 }
 };
 
 const PHASES = [
