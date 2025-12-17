@@ -303,8 +303,8 @@ const App = () => {
         seg1.add(joint);
         
         // Add a hitbox specifically for grabbing the Knee/Elbow to point the limb
-        // Increased size to 0.7 for easier grabbing
-        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 8), invisibleMaterialRef.current);
+        // Increased size to 0.9 for easier grabbing
+        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.9, 8, 8), invisibleMaterialRef.current);
         kneeHitbox.position.y = seg1Length / 2;
         kneeHitbox.userData = { isPart: true, isHitbox: true, type: 'knee', limbIndex: index };
         seg1.add(kneeHitbox);
@@ -318,8 +318,8 @@ const App = () => {
         seg2.name = "visual";
 
         // Tip Hitbox
-        // Increased size to 0.7 for easier grabbing
-        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 8), invisibleMaterialRef.current);
+        // Increased size to 1.2 for significantly easier grabbing of tips
+        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(1.2, 8, 8), invisibleMaterialRef.current);
         tipHitbox.position.y = seg2Length; // At the very end
         tipHitbox.userData = { isPart: true, isHitbox: true, type: 'tip', limbIndex: index };
         tipHitbox.name = "hitbox_tip";
@@ -450,12 +450,44 @@ const App = () => {
       }
   }
 
+  const snapCameraToNearestView = () => {
+      if (!cameraRef.current || !controlsRef.current) return;
+      
+      const controls = controlsRef.current;
+      const camera = cameraRef.current;
+
+      const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+      const distance = offset.length();
+      const direction = offset.normalize();
+
+      const views = [
+          new THREE.Vector3(0, 0, 1),  // Front
+          new THREE.Vector3(0, 0, -1), // Back
+          new THREE.Vector3(1, 0, 0),  // Right
+          new THREE.Vector3(-1, 0, 0), // Left
+          new THREE.Vector3(0, 1, 0),  // Top
+          new THREE.Vector3(0, -1, 0)  // Bottom
+      ];
+
+      let maxDot = -Infinity;
+      let bestView = views[0];
+
+      views.forEach(v => {
+          const dot = direction.dot(v);
+          if (dot > maxDot) {
+              maxDot = dot;
+              bestView = v;
+          }
+      });
+
+      const newPos = bestView.clone().multiplyScalar(distance).add(controls.target);
+      camera.position.copy(newPos);
+      camera.lookAt(controls.target);
+      controls.update();
+  };
+
   // --- Interaction Logic ---
   const handlePointerDown = (e: React.PointerEvent) => {
-    const currentTime = new Date().getTime();
-    if (currentTime - lastTapRef.current < 300) setShowLabels(prev => !prev);
-    lastTapRef.current = currentTime;
-
     const rect = rendererRef.current!.domElement.getBoundingClientRect();
     mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -464,6 +496,14 @@ const App = () => {
     // Check hitboxes
     const intersects = raycasterRef.current.intersectObjects(creatureRef.current!.children, true);
     const hit = intersects.find(i => i.object.userData.isHitbox);
+
+    const currentTime = new Date().getTime();
+    if (currentTime - lastTapRef.current < 300) {
+         if (!hit) {
+             snapCameraToNearestView();
+         }
+    }
+    lastTapRef.current = currentTime;
 
     previousPointerRef.current = { x: e.clientX, y: e.clientY };
 
@@ -896,7 +936,13 @@ const App = () => {
                   <button onClick={saveSnapshot} className={secondaryBtnClass}><Download size={14} /></button>
             </div>
             <div className="flex items-center gap-4 pointer-events-auto">
-                 <button onClick={() => setOrbitEnabled(!orbitEnabled)} className={iconBtnClass(orbitEnabled)}><Eye size={18} strokeWidth={2} /></button>
+                 <button 
+                     onClick={() => setOrbitEnabled(!orbitEnabled)} 
+                     onDoubleClick={(e) => { e.stopPropagation(); setShowLabels(prev => !prev); }}
+                     className={iconBtnClass(orbitEnabled)}
+                 >
+                    <Eye size={18} strokeWidth={2} />
+                 </button>
                  <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}><Hand size={18} strokeWidth={2} /></button>
                  <button onClick={snapToGrid} className={iconBtnClass(false)}><Grid3X3 size={18} strokeWidth={2} /></button>
                  <div className="w-px h-6 bg-current opacity-20 mx-1"></div>
