@@ -41,6 +41,13 @@ const INITIAL_POSE: PoseData = {
   "limb_7_joint_2": { "x": 2.418, "y": 0.4, "z": -1.043 }
 };
 
+const PHASES = [
+  { name: "discover", limbs: [0, 1] },
+  { name: "define", limbs: [2, 3] },
+  { name: "develop", limbs: [4, 5] },
+  { name: "deploy", limbs: [6, 7] }
+];
+
 const COLORS = {
   light: {
     bg: 0xf2f2f7,
@@ -85,6 +92,15 @@ const createWobblyGeometry = (baseGeo: THREE.BufferGeometry, magnitude: number =
   
   geo.computeVertexNormals();
   return geo;
+};
+
+// --- Helper: Strip Markdown ---
+const stripMarkdown = (text: string) => {
+    let clean = text.trim();
+    if (clean.startsWith("```json")) clean = clean.substring(7);
+    if (clean.startsWith("```")) clean = clean.substring(3);
+    if (clean.endsWith("```")) clean = clean.substring(0, clean.length - 3);
+    return clean.trim();
 };
 
 // --- Hook: System Theme ---
@@ -144,6 +160,9 @@ const App = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isDrawingRef = useRef(false);
+
+  // Labels Refs
+  const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   // Material Refs
   const limbMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
@@ -251,6 +270,7 @@ const App = () => {
 
         const seg1Wrapper = new THREE.Group();
         seg1Wrapper.userData = { isJoint: true, id: `limb_${index}_joint_1` };
+        seg1Wrapper.name = `limb_${index}_joint_1`;
         
         seg1Wrapper.add(seg1);
         seg1Wrapper.add(seg1Hitbox); 
@@ -278,6 +298,7 @@ const App = () => {
 
         const seg2Wrapper = new THREE.Group();
         seg2Wrapper.userData = { isJoint: true, id: `limb_${index}_joint_2` };
+        seg2Wrapper.name = `limb_${index}_joint_2`;
         seg2Wrapper.position.y = seg1Length; 
 
         seg2Wrapper.add(seg2);
@@ -300,11 +321,58 @@ const App = () => {
         applyPoseToRef(INITIAL_POSE, creatureGroup);
     }
 
+    // Animation Loop
+    const tempV = new THREE.Vector3();
+
     const animate = () => {
       requestAnimationFrame(animate);
       if (controlsRef.current) controlsRef.current.update();
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
+        
+        // Update Labels
+        if (!isCanvasMode) {
+            PHASES.forEach((phase, index) => {
+                const labelDiv = labelRefs.current[index];
+                if (!labelDiv || !creatureGroup) return;
+
+                // Find center of mass for this phase's limbs
+                tempV.set(0,0,0);
+                let count = 0;
+                
+                phase.limbs.forEach(limbIdx => {
+                    // Try to find the second joint (the end)
+                    let foundEnd = false;
+                    creatureGroup.traverse(c => {
+                        if (c.name === `limb_${limbIdx}_joint_2`) {
+                            const worldPos = new THREE.Vector3();
+                            c.getWorldPosition(worldPos);
+                            // Bias towards the end of the limb
+                            worldPos.y += 1; // Approx offset
+                            tempV.add(worldPos);
+                            count++;
+                            foundEnd = true;
+                        }
+                    });
+                });
+
+                if (count > 0) {
+                    tempV.divideScalar(count);
+                    tempV.project(cameraRef.current!);
+
+                    const x = (tempV.x * .5 + .5) * window.innerWidth;
+                    const y = (tempV.y * -.5 + .5) * window.innerHeight;
+
+                    // Hide if behind camera
+                    if (tempV.z > 1) {
+                         labelDiv.style.display = 'none';
+                    } else {
+                        labelDiv.style.display = 'block';
+                        labelDiv.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+                    }
+                }
+            });
+        }
       }
     };
     animate();
@@ -327,6 +395,7 @@ const App = () => {
   };
 
   const generateRandomPose = () => {
+     // Re-using strategies but mapping to new concept internally
      const strategies = [
          () => {
              const j1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
@@ -337,28 +406,10 @@ const App = () => {
              return pose;
          },
          () => {
-             const t1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
-             const t2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
-             const b1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
-             const b2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
-             const pose: PoseData = {};
-             for(let i=0; i<4; i++) { pose[`limb_${i}_joint_1`] = t1; pose[`limb_${i}_joint_2`] = t2; }
-             for(let i=4; i<8; i++) { pose[`limb_${i}_joint_1`] = b1; pose[`limb_${i}_joint_2`] = b2; }
-             return pose;
-         },
-         () => {
-             const a1 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
-             const a2 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
-             const b1 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
-             const b2 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
              const pose: PoseData = {};
              for(let i=0; i<8; i++) {
-                 const isEven = i % 2 === 0;
-                 const flip = i >= 4 ? -1 : 1;
-                 const p1 = isEven ? a1 : b1;
-                 const p2 = isEven ? a2 : b2;
-                 pose[`limb_${i}_joint_1`] = { x: p1.x * flip, y: p1.y, z: p1.z };
-                 pose[`limb_${i}_joint_2`] = { x: p2.x * flip, y: p2.y, z: p2.z };
+                 pose[`limb_${i}_joint_1`] = { x: (Math.random()-0.5)*2, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
+                 pose[`limb_${i}_joint_2`] = { x: (Math.random()-0.5)*2, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
              }
              return pose;
          }
@@ -579,15 +630,16 @@ const App = () => {
         const base64Data = dataUrl.split(",")[1];
         
         const prompt = `
-          Analyze this sketch of an abstract creature. It has a vertical diamond-like symmetry.
-          There are 8 limbs total.
-          Limbs 0, 1, 2, 3 are the UPPER limbs (top half).
-          Limbs 4, 5, 6, 7 are the LOWER limbs (bottom half).
-          Each limb has 2 joints. 
-          Joint 1 is the base (shoulder/hip). Joint 2 is the elbow/knee.
+          Analyze this sketch of a Double Diamond process visualization.
+          The creature has 8 limbs grouped into 4 pairs representing the process phases:
           
-          Estimate the 3D local rotations (x, y, z in radians) for all 16 joints to match the pose in the sketch.
-          Return a JSON object where keys are "limb_N_joint_M" (0-7, 1-2) and values are objects with x, y, z.
+          1. DISCOVER: Top-most limbs. (Map to limb_0 and limb_1).
+          2. DEFINE: Upper-middle limbs. (Map to limb_2 and limb_3).
+          3. DEVELOP: Lower-middle limbs. (Map to limb_4 and limb_5).
+          4. DEPLOY: Bottom-most limbs. (Map to limb_6 and limb_7).
+
+          Estimate the 3D local rotations (x, y, z in radians) for all 16 joints (2 per limb) to match the pose in the sketch.
+          Ensure the output is a valid JSON object matching the schema.
         `;
 
         // Explicitly define schema properties for all 16 joints to ensure valid JSON
@@ -609,21 +661,20 @@ const App = () => {
                 responseMimeType: "application/json",
                 responseSchema: {
                   type: Type.OBJECT,
-                  description: "Pose data for the 8-limbed creature",
+                  description: "Pose data for the Double Diamond creature",
                   properties: properties,
                   required: Object.keys(properties)
                 }
             }
         });
 
-        const text = response.text;
-        if (text) {
-            const pose = JSON.parse(text);
-            if (creatureRef.current) {
-                applyPoseToRef(pose, creatureRef.current);
-            }
-            setIsCanvasMode(false);
+        const text = stripMarkdown(response.text || "{}");
+        const pose = JSON.parse(text);
+        
+        if (creatureRef.current) {
+            applyPoseToRef(pose, creatureRef.current);
         }
+        setIsCanvasMode(false);
       } catch (err) {
           console.error("Failed to generate pose", err);
           alert("Could not generate pose. Please check if the API Key is configured correctly in the environment.");
@@ -721,6 +772,18 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
       
+      {/* 3D Labels Layer */}
+      {!isCanvasMode && PHASES.map((phase, i) => (
+          <div 
+             key={phase.name}
+             ref={el => labelRefs.current[i] = el}
+             className={`absolute top-0 left-0 text-sm font-medium tracking-wide pointer-events-none transition-opacity duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`}
+             style={{ display: 'none' }} // Controlled by animation loop
+          >
+              {phase.name}
+          </div>
+      ))}
+
       {/* Canvas Overlay */}
       {isCanvasMode && (
           <div className="absolute inset-0 z-50 bg-white cursor-crosshair touch-none">
