@@ -42,7 +42,6 @@ const INITIAL_POSE: PoseData = {
 };
 
 // Generate labels: Smarter, less cluttered logic.
-// Only label the "corner" limbs (0, 3 for top; 4, 7 for bottom) to reduce density.
 const generateLabels = () => {
     const labels = [];
     const representativeLimbs = [0, 3, 4, 7]; // Only label 4 out of 8 limbs to keep it clean
@@ -64,7 +63,7 @@ const COLORS = {
   light: {
     bg: 0xf2f2f7,
     fog: 0xf2f2f7,
-    limb: 0x000000, // Black figure
+    limb: 0x000000, 
     joint: 0x000000,
     edge: 0xaeaeb2,
     ambient: 0xffffff,
@@ -85,7 +84,6 @@ const COLORS = {
 
 const CACHE_KEY = "mento_pose_cache";
 
-// --- Helper: Wobbly Geometry ---
 const createWobblyGeometry = (baseGeo: THREE.BufferGeometry, magnitude: number = 0.015) => {
   const geo = baseGeo.clone();
   const posAttribute = geo.attributes.position;
@@ -105,7 +103,6 @@ const createWobblyGeometry = (baseGeo: THREE.BufferGeometry, magnitude: number =
   return geo;
 };
 
-// --- Helper: Strip Markdown ---
 const stripMarkdown = (text: string) => {
     let clean = text.trim();
     if (clean.startsWith("```json")) clean = clean.substring(7);
@@ -142,6 +139,8 @@ const App = () => {
   const [copied, setCopied] = useState(false);
   const [isCanvasMode, setIsCanvasMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [showLabels, setShowLabels] = useState(true);
+  const [strokeCount, setStrokeCount] = useState(0);
   
   const [orbitEnabled, setOrbitEnabled] = useState(true);
   const [grabEnabled, setGrabEnabled] = useState(true);
@@ -161,6 +160,7 @@ const App = () => {
   const dragStartVectorRef = useRef(new THREE.Vector3());
   const jointWorldPosRef = useRef(new THREE.Vector3());
   const previousPointerRef = useRef({ x: 0, y: 0 });
+  const lastTapRef = useRef(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -192,7 +192,6 @@ const App = () => {
     scene.fog = new THREE.FogExp2(0x000000, 0.03); 
     sceneRef.current = scene;
 
-    // ORTHOGRAPHIC CAMERA SETUP
     const frustumSize = 12;
     const aspect = window.innerWidth / window.innerHeight;
     const camera = new THREE.OrthographicCamera(
@@ -203,7 +202,6 @@ const App = () => {
         0.1,
         1000
     );
-    // Camera must be close enough so fog doesn't obscure everything
     camera.position.set(0, 0, 20);
     camera.zoom = 1;
     camera.updateProjectionMatrix();
@@ -262,7 +260,6 @@ const App = () => {
         creatureGroup.add(pivotGroup);
 
         const seg1Length = 1.5;
-        // Skinny legs
         const thickness = 0.05; 
         
         const seg1BaseGeo = new THREE.BoxGeometry(thickness, seg1Length, thickness, 3, 12, 3);
@@ -335,11 +332,16 @@ const App = () => {
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
         
-        // Update Labels (Individual for each segment)
+        // Update Labels
         if (!isCanvasMode) {
             INDIVIDUAL_LABELS.forEach((item, index) => {
                 const labelDiv = labelRefs.current[index];
                 if (!labelDiv || !creatureGroup) return;
+
+                if (!showLabels) {
+                    labelDiv.style.opacity = '0';
+                    return;
+                }
 
                 const jointName = `limb_${item.limbIndex}_joint_${item.jointIndex}`;
                 let targetMesh: THREE.Object3D | null = null;
@@ -355,11 +357,10 @@ const App = () => {
                     (targetMesh as THREE.Mesh).getWorldPosition(tempV);
                     const projV = tempV.clone().project(cameraRef.current!);
 
-                    const x = (projV.x * .5 + .5) * window.innerWidth;
+                    // Move label 30px to the right
+                    const x = (projV.x * .5 + .5) * window.innerWidth + 30;
                     const y = (projV.y * -.5 + .5) * window.innerHeight;
 
-                    // Orthographic projection logic for visibility
-                    // Check if it's within the -1 to 1 range
                     if (Math.abs(projV.x) > 1.1 || Math.abs(projV.y) > 1.1) {
                          labelDiv.style.opacity = '0';
                     } else {
@@ -378,7 +379,7 @@ const App = () => {
       mountRef.current?.removeChild(renderer.domElement);
       renderer.dispose();
     };
-  }, []);
+  }, [showLabels]); 
 
   const applyPoseToRef = (pose: PoseData, group: THREE.Group) => {
       group.traverse((obj) => {
@@ -423,6 +424,14 @@ const App = () => {
   }
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    // Double tap detection logic
+    const currentTime = new Date().getTime();
+    const tapLength = currentTime - lastTapRef.current;
+    if (tapLength < 300 && tapLength > 0) {
+        setShowLabels(prev => !prev);
+    }
+    lastTapRef.current = currentTime;
+
     const rect = rendererRef.current!.domElement.getBoundingClientRect();
     mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -510,8 +519,6 @@ const App = () => {
 
           const sensitivity = 0.005;
           const cam = cameraRef.current!;
-          // For Orthographic, rotation interaction feels different, keep standard mapping for now
-          // or simple trackball logic
           const rotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), deltaY * sensitivity);
           const rotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), deltaX * sensitivity);
           const deltaQ = rotY.multiply(rotX);
@@ -590,13 +597,23 @@ const App = () => {
   };
 
   const stopDrawing = () => {
+      if (!isDrawingRef.current) return;
       isDrawingRef.current = false;
       ctxRef.current?.closePath();
+      
+      // Magic Pose: Increment stroke and check if done
+      const newCount = strokeCount + 1;
+      setStrokeCount(newCount);
+      
+      if (newCount === 8) {
+          analyzeSketchAndApply();
+      }
   };
   
   const clearCanvas = () => {
       if (canvasRef.current && ctxRef.current) {
           ctxRef.current.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+          setStrokeCount(0);
       }
   };
 
@@ -620,12 +637,18 @@ const App = () => {
         const base64Data = dataUrl.split(",")[1];
         
         const prompt = `
-          Analyze this sketch of a 3D structure with 8 articulated limbs (4 top, 4 bottom).
-          Return a JSON object with rotational values (x, y, z in radians) for all 16 joints.
+          Analyze this sketch where the user has drawn exactly 8 strokes.
+          Each stroke corresponds to one of the 8 articulated limbs of the figure from the current view perspective.
           
           Structure:
           - 8 Limbs indexed 0 to 7.
-          - Each limb has 2 joints: joint_1 (base/inner) and joint_2 (mid/outer).
+          - Limbs 0-3 are the top (arms/upper).
+          - Limbs 4-7 are the bottom (legs/lower).
+          
+          Your task:
+          1. Map each drawn stroke to one of the 8 limbs.
+          2. Determine the 3D rotation (x, y, z radians) for both joints of each limb (joint_1: base, joint_2: mid) to best match the drawn visual angle and direction.
+          3. Return a JSON object with these rotations.
           
           Required JSON Format:
           {
@@ -655,9 +678,11 @@ const App = () => {
             applyPoseToRef(pose, creatureRef.current);
         }
         setIsCanvasMode(false);
+        setStrokeCount(0);
       } catch (err) {
           console.error("Failed to generate pose", err);
           alert("Could not generate pose. Check console for details.");
+          setStrokeCount(0);
       } finally {
           setIsGenerating(false);
       }
@@ -728,8 +753,9 @@ const App = () => {
   const isDark = theme === 'dark';
   const bgClass = isDark ? 'bg-black text-white' : 'bg-[#F2F2F7] text-black';
   
+  // Cleaned up UI classes: No shadows
   const iconBtnClass = (active: boolean) => 
-    `flex items-center justify-center w-12 h-12 rounded-full transition-all active:scale-95 shadow-md ${
+    `flex items-center justify-center w-12 h-12 rounded-full transition-all active:scale-95 ${
       active 
        ? (isDark ? 'bg-white text-black' : 'bg-black text-white') 
        : (isDark ? 'bg-neutral-800 text-neutral-400' : 'bg-white text-neutral-400')
@@ -741,7 +767,7 @@ const App = () => {
     }`;
   
   const pillContainerClass = 
-    `flex items-center gap-1 p-1 rounded-full shadow-sm border backdrop-blur-md ${
+    `flex items-center gap-1 p-1 rounded-full border backdrop-blur-md ${
         isDark ? 'bg-neutral-900/80 border-white/5' : 'bg-white/80 border-black/5'
     }`;
 
@@ -756,12 +782,12 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
       
-      {/* 3D Labels Layer - Now with "Reenie Beanie" font and reduced size */}
+      {/* 3D Labels Layer - Larger font (text-3xl) and offset */}
       {!isCanvasMode && INDIVIDUAL_LABELS.map((item, i) => (
           <div 
              key={`${item.limbIndex}-${item.jointIndex}`}
              ref={el => labelRefs.current[i] = el}
-             className={`absolute top-0 left-0 text-[10px] md:text-xs font-hand leading-none pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`}
+             className={`absolute top-0 left-0 text-3xl font-hand leading-none pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`}
              style={{ opacity: 0 }} 
           >
               {item.text}
@@ -782,7 +808,7 @@ const App = () => {
                 onTouchEnd={stopDrawing}
               />
               <div className="absolute top-safe right-4 mt-12 flex flex-col gap-4">
-                  <button onClick={() => setIsCanvasMode(false)} className="bg-black/10 hover:bg-black/20 p-3 rounded-full text-black">
+                  <button onClick={() => { setIsCanvasMode(false); setStrokeCount(0); }} className="bg-black/10 hover:bg-black/20 p-3 rounded-full text-black">
                       <X size={24} />
                   </button>
                   <button onClick={clearCanvas} className="bg-black/10 hover:bg-black/20 p-3 rounded-full text-black">
@@ -790,21 +816,22 @@ const App = () => {
                   </button>
               </div>
 
+              {/* Stroke Counter / Status */}
+              <div className="absolute top-12 left-0 right-0 flex justify-center pointer-events-none">
+                   <div className="bg-black/10 text-black px-4 py-2 rounded-full font-hand text-2xl font-bold">
+                       {isGenerating ? "Thinking..." : `${strokeCount} / 8`}
+                   </div>
+              </div>
+
+              {/* Manual Trigger (Optional fallback if user gets stuck) */}
               <div className="absolute bottom-12 left-0 right-0 flex justify-center items-center pointer-events-none">
-                  <button 
-                    onClick={analyzeSketchAndApply}
-                    disabled={isGenerating}
-                    className={`pointer-events-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full font-bold shadow-lg transition-all active:scale-95 ${
-                        isGenerating ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-500'
-                    } text-white`}
-                  >
-                      {isGenerating ? (
+                 {isGenerating && (
+                  <div className={`pointer-events-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full font-bold shadow-none transition-all ${
+                        'bg-gray-400' 
+                    } text-white`}>
                         <RefreshCcw className="animate-spin" size={20} />
-                      ) : (
-                        <Sparkles size={20} />
-                      )}
-                      <span>Apply</span>
-                  </button>
+                  </div>
+                 )}
               </div>
           </div>
       )}
@@ -830,7 +857,7 @@ const App = () => {
                     <Hand size={20} strokeWidth={2} />
                  </button>
                  <div className="w-px h-6 bg-current opacity-20 mx-1"></div>
-                 <button onClick={() => setIsCanvasMode(true)} className={iconBtnClass(false)}>
+                 <button onClick={() => { setIsCanvasMode(true); setStrokeCount(0); }} className={iconBtnClass(false)}>
                     <Pencil size={20} strokeWidth={2} />
                  </button>
             </div>
