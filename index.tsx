@@ -151,6 +151,9 @@ const App = () => {
   const [isCanvasMode, setIsCanvasMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
+  const showLabelsRef = useRef(true); // Ref to track visibility in animation loop
+
+  useEffect(() => { showLabelsRef.current = showLabels; }, [showLabels]);
   
   const [orbitEnabled, setOrbitEnabled] = useState(true);
   const [grabEnabled, setGrabEnabled] = useState(true);
@@ -301,7 +304,8 @@ const App = () => {
         seg1.position.y = seg1Length / 2;
         seg1.name = "visual";
         
-        const seg1HitboxGeo = new THREE.BoxGeometry(0.3, seg1Length, 0.3);
+        // Reduced Hitbox Size
+        const seg1HitboxGeo = new THREE.BoxGeometry(0.25, seg1Length, 0.25);
         const seg1Hitbox = new THREE.Mesh(seg1HitboxGeo, invisibleMaterialRef.current);
         seg1Hitbox.position.y = seg1Length / 2;
         seg1Hitbox.userData = { isPart: true, isHitbox: true, type: 'joint', limbIndex: index, jointIndex: 1 };
@@ -320,8 +324,8 @@ const App = () => {
         joint.visible = false; 
         seg1.add(joint);
         
-        // Knee Hitbox - Larger
-        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 8), invisibleMaterialRef.current);
+        // Knee Hitbox - Reduced
+        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), invisibleMaterialRef.current);
         kneeHitbox.position.y = seg1Length / 2;
         kneeHitbox.userData = { isPart: true, isHitbox: true, type: 'knee', limbIndex: index };
         seg1.add(kneeHitbox);
@@ -334,15 +338,15 @@ const App = () => {
         seg2.position.y = seg2Length / 2;
         seg2.name = "visual";
 
-        // Tip Hitbox - Larger
-        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(2.0, 8, 8), invisibleMaterialRef.current);
+        // Tip Hitbox - Reduced
+        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8), invisibleMaterialRef.current);
         tipHitbox.position.y = seg2Length; // At the very end
         tipHitbox.userData = { isPart: true, isHitbox: true, type: 'tip', limbIndex: index };
         tipHitbox.name = "hitbox_tip";
         seg2.add(tipHitbox);
 
-        // Standard segment hitbox
-        const seg2HitboxGeo = new THREE.ConeGeometry(0.3, seg2Length, 4);
+        // Standard segment hitbox - Reduced
+        const seg2HitboxGeo = new THREE.ConeGeometry(0.25, seg2Length, 4);
         const seg2Hitbox = new THREE.Mesh(seg2HitboxGeo, invisibleMaterialRef.current);
         seg2Hitbox.position.y = seg2Length / 2;
         seg2Hitbox.userData = { isPart: true, isHitbox: true, type: 'segment', limbIndex: index, jointIndex: 2 };
@@ -396,7 +400,7 @@ const App = () => {
         
         // Default to hidden
         labelDiv.style.opacity = '0';
-        if (!showLabels) return;
+        if (!showLabelsRef.current) return; // Check Ref for current state
 
         const jointName = `limb_${item.limbIndex}_joint_${item.jointIndex}`;
         let targetMesh: THREE.Object3D | null = null;
@@ -888,6 +892,7 @@ const App = () => {
   }, [isCanvasMode]);
 
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+      if (isGenerating) return; // Block drawing if generating
       if (!ctxRef.current || !canvasRef.current) return;
       const { x, y } = getCoords(e);
       const w = canvasRef.current.width;
@@ -906,6 +911,7 @@ const App = () => {
   };
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
+      if (isGenerating) return; // Block drawing if generating
       if (!isDrawingRef.current || !ctxRef.current) return;
       const { x, y } = getCoords(e);
       currentStrokeRef.current.push({x, y});
