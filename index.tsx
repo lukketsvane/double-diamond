@@ -22,17 +22,14 @@ type PoseData = Record<string, {x: number, y: number, z: number}>;
 type ThemeMode = 'light' | 'dark';
 
 // --- Constants ---
-// Perfect Angles: Symmetrical Diamond Shape
-// J1 at 0 uses the structural 45deg slope defined in geometry construction.
-// J2 at ~1.57 (90deg) bends the tip back inwards to form the diamond shape.
 const INITIAL_POSE: PoseData = {
-  "limb_0_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_0_joint_1": { "x": -0.102, "y": 0.062, "z": 1.451 },
   "limb_0_joint_2": { "x": 0, "y": 0, "z": 1.57 },
-  "limb_1_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_1_joint_1": { "x": -0.001, "y": -0.062, "z": 1.421 },
   "limb_1_joint_2": { "x": 0, "y": 0, "z": 1.57 },
-  "limb_2_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_2_joint_1": { "x": -0.109, "y": -0.05, "z": 1.444 },
   "limb_2_joint_2": { "x": 0, "y": 0, "z": 1.57 },
-  "limb_3_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_3_joint_1": { "x": 0.077, "y": 0.365, "z": 1.376 },
   "limb_3_joint_2": { "x": 0, "y": 0, "z": 1.57 },
   "limb_4_joint_1": { "x": 0, "y": 0, "z": 0 },
   "limb_4_joint_2": { "x": 0, "y": 0, "z": 1.57 },
