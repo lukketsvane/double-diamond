@@ -20,6 +20,11 @@ import {
 // --- Types ---
 type PoseData = Record<string, {x: number, y: number, z: number}>;
 type ThemeMode = 'light' | 'dark';
+type Stroke = {
+    points: {x: number, y: number}[];
+    knee: {x: number, y: number};
+    tip: {x: number, y: number};
+};
 
 // --- Constants ---
 const LIMB_SEGMENT_1_LENGTH = 1.5;
@@ -173,7 +178,6 @@ const App = () => {
   const [isCanvasMode, setIsCanvasMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
-  const [strokeCount, setStrokeCount] = useState(0);
   
   const [orbitEnabled, setOrbitEnabled] = useState(true);
   const [grabEnabled, setGrabEnabled] = useState(true);
@@ -190,15 +194,20 @@ const App = () => {
   // Interaction State
   const isDraggingRef = useRef(false);
   const dragModeRef = useRef<'joint_rotate' | 'ik_drag' | null>(null);
-  const dragTargetRef = useRef<THREE.Object3D | null>(null); // The object being dragged (Joint1 or Tip)
+  const dragTargetRef = useRef<THREE.Object3D | null>(null); 
   const dragPlaneRef = useRef(new THREE.Plane());
   
   const previousPointerRef = useRef({ x: 0, y: 0 });
   const lastTapRef = useRef(0);
 
+  // Canvas State
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isDrawingRef = useRef(false);
+  const strokesRef = useRef<Stroke[]>([]);
+  const currentStrokeRef = useRef<{x: number, y: number}[]>([]);
+  const [strokeCount, setStrokeCount] = useState(0);
+
   const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const limbMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
@@ -285,7 +294,6 @@ const App = () => {
         const seg1HitboxGeo = new THREE.BoxGeometry(0.3, seg1Length, 0.3);
         const seg1Hitbox = new THREE.Mesh(seg1HitboxGeo, invisibleMaterialRef.current);
         seg1Hitbox.position.y = seg1Length / 2;
-        // Mark as hitbox for Joint 1 (The base)
         seg1Hitbox.userData = { isPart: true, isHitbox: true, type: 'joint', limbIndex: index, jointIndex: 1 };
         seg1Hitbox.name = "hitbox_j1";
 
@@ -296,15 +304,14 @@ const App = () => {
         seg1Wrapper.add(seg1Hitbox); 
         pivotGroup.add(seg1Wrapper);
 
-        // Joint Mesh (Knee/Elbow) - VISUAL HIDDEN but physically there for structure
+        // Joint Mesh (Knee/Elbow) - Hidden but structural
         const joint = new THREE.Mesh(new THREE.SphereGeometry(thickness * 2.5, 12, 12), jointMaterialRef.current);
         joint.position.y = seg1Length / 2;
-        joint.visible = false; // Hide visual joint as requested
+        joint.visible = false; 
         seg1.add(joint);
         
-        // Add a hitbox specifically for grabbing the Knee/Elbow to point the limb
-        // Increased size to 0.9 for easier grabbing
-        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.9, 8, 8), invisibleMaterialRef.current);
+        // Knee Hitbox - Larger
+        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 8), invisibleMaterialRef.current);
         kneeHitbox.position.y = seg1Length / 2;
         kneeHitbox.userData = { isPart: true, isHitbox: true, type: 'knee', limbIndex: index };
         seg1.add(kneeHitbox);
@@ -317,9 +324,8 @@ const App = () => {
         seg2.position.y = seg2Length / 2;
         seg2.name = "visual";
 
-        // Tip Hitbox
-        // Increased size to 1.2 for significantly easier grabbing of tips
-        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(1.2, 8, 8), invisibleMaterialRef.current);
+        // Tip Hitbox - Larger
+        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(2.0, 8, 8), invisibleMaterialRef.current);
         tipHitbox.position.y = seg2Length; // At the very end
         tipHitbox.userData = { isPart: true, isHitbox: true, type: 'tip', limbIndex: index };
         tipHitbox.name = "hitbox_tip";
@@ -452,34 +458,22 @@ const App = () => {
 
   const snapCameraToNearestView = () => {
       if (!cameraRef.current || !controlsRef.current) return;
-      
       const controls = controlsRef.current;
       const camera = cameraRef.current;
-
       const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
       const distance = offset.length();
       const direction = offset.normalize();
-
       const views = [
-          new THREE.Vector3(0, 0, 1),  // Front
-          new THREE.Vector3(0, 0, -1), // Back
-          new THREE.Vector3(1, 0, 0),  // Right
-          new THREE.Vector3(-1, 0, 0), // Left
-          new THREE.Vector3(0, 1, 0),  // Top
-          new THREE.Vector3(0, -1, 0)  // Bottom
+          new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1),
+          new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+          new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0)
       ];
-
       let maxDot = -Infinity;
       let bestView = views[0];
-
       views.forEach(v => {
           const dot = direction.dot(v);
-          if (dot > maxDot) {
-              maxDot = dot;
-              bestView = v;
-          }
+          if (dot > maxDot) { maxDot = dot; bestView = v; }
       });
-
       const newPos = bestView.clone().multiplyScalar(distance).add(controls.target);
       camera.position.copy(newPos);
       camera.lookAt(controls.target);
@@ -493,18 +487,14 @@ const App = () => {
     mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current!);
     
-    // Check hitboxes
     const intersects = raycasterRef.current.intersectObjects(creatureRef.current!.children, true);
     const hit = intersects.find(i => i.object.userData.isHitbox);
 
     const currentTime = new Date().getTime();
     if (currentTime - lastTapRef.current < 300) {
-         if (!hit) {
-             snapCameraToNearestView();
-         }
+         if (!hit) snapCameraToNearestView();
     }
     lastTapRef.current = currentTime;
-
     previousPointerRef.current = { x: e.clientX, y: e.clientY };
 
     if (hit && grabEnabled) {
@@ -512,32 +502,25 @@ const App = () => {
         if (controlsRef.current) controlsRef.current.enabled = false;
         isDraggingRef.current = true;
         
-        const type = hit.object.userData.type; // 'tip', 'knee', 'joint', 'segment'
+        const type = hit.object.userData.type; 
         const limbIndex = hit.object.userData.limbIndex;
-        
-        // Find the main joint wrappers
         const joint1 = creatureRef.current!.getObjectByName(`limb_${limbIndex}_joint_1`);
         const joint2 = creatureRef.current!.getObjectByName(`limb_${limbIndex}_joint_2`);
         
-        // Determine drag plane (plane passing through hit point facing camera)
         const hitPoint = hit.point.clone();
         const camDir = new THREE.Vector3();
         cameraRef.current!.getWorldDirection(camDir);
         dragPlaneRef.current.setFromNormalAndCoplanarPoint(camDir, hitPoint);
         
         if (type === 'tip') {
-             // Dragging tip -> IK Mode
              dragModeRef.current = 'ik_drag';
-             // Store reference to the whole limb structure needed for IK
              dragTargetRef.current = joint1 as THREE.Object3D; 
              selectJoint((joint2 as any).children.find((c: any) => c.name==='visual') || joint2 as THREE.Mesh);
         } else if (type === 'knee') {
-             // Dragging knee -> LookAt Mode (Rotate Joint 1 to look at cursor)
              dragModeRef.current = 'joint_rotate';
              dragTargetRef.current = joint1 as THREE.Object3D;
              selectJoint((joint1 as any).children.find((c: any) => c.name==='visual') || joint1 as THREE.Mesh);
         } else {
-             // Default rotating behavior (existing lever drag)
              dragModeRef.current = 'joint_rotate';
              const wrapper = hit.object.parent!.userData.isJoint ? hit.object.parent : hit.object.parent!.parent;
              dragTargetRef.current = wrapper as THREE.Object3D;
@@ -554,128 +537,58 @@ const App = () => {
 
   const handlePointerMove = (e: React.PointerEvent) => {
       if (!isDraggingRef.current || !dragTargetRef.current) return;
-      
       const rect = rendererRef.current!.domElement.getBoundingClientRect();
       const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      
       raycasterRef.current.setFromCamera(new THREE.Vector2(nx, ny), cameraRef.current!);
       const ray = raycasterRef.current.ray;
-      
-      // Calculate intersection with the drag plane
       const targetPoint = new THREE.Vector3();
       if (!ray.intersectPlane(dragPlaneRef.current, targetPoint)) return;
 
       if (dragModeRef.current === 'ik_drag') {
-          // --- IK SOLVER with Snapping ---
           const joint1 = dragTargetRef.current;
           const joint2 = joint1.getObjectByName(joint1.name.replace('joint_1', 'joint_2'))!;
-          
-          // 1. Auto Snap
           let snapPos = targetPoint.clone();
           let minDist = SNAP_THRESHOLD;
           let snapped = false;
-
           creatureRef.current!.traverse(obj => {
               if (obj.userData.isHitbox && obj.userData.type === 'tip') {
-                  // Don't snap to self
                   if (obj.userData.limbIndex === joint1.userData.limbIndex) return;
-                  
                   const otherTipWorld = new THREE.Vector3();
                   obj.getWorldPosition(otherTipWorld);
                   const d = otherTipWorld.distanceTo(targetPoint);
-                  if (d < minDist) {
-                      minDist = d;
-                      snapPos.copy(otherTipWorld);
-                      snapped = true;
-                  }
+                  if (d < minDist) { minDist = d; snapPos.copy(otherTipWorld); snapped = true; }
               }
           });
-
           const finalTarget = snapped ? snapPos : targetPoint;
-
-          // 2. Solve 2-Bone IK
-          // Root position (Joint 1 world pos)
           const rootPos = new THREE.Vector3();
           joint1.getWorldPosition(rootPos);
-          
-          // Vector from Root to Target
           const direction = new THREE.Vector3().subVectors(finalTarget, rootPos);
           let dist = direction.length();
-          
-          // Clamp distance to total limb length
           const l1 = LIMB_SEGMENT_1_LENGTH;
           const l2 = LIMB_SEGMENT_2_LENGTH;
-          if (dist > l1 + l2 - 0.01) {
-              dist = l1 + l2 - 0.01;
-              direction.normalize().multiplyScalar(dist);
-          }
+          if (dist > l1 + l2 - 0.01) { dist = l1 + l2 - 0.01; direction.normalize().multiplyScalar(dist); }
           
-          // Point Joint 1 towards target
-          // Simple LookAt doesn't work well due to hierarchy, use Quaternion
-          const up = new THREE.Vector3(0, 1, 0); // Limbs are built along Y
-          
-          // We want the 'end' of the chain to touch 'finalTarget'.
-          // First, rotate Joint 1 so the entire limb plane aligns with target
-          // This is a simplification: We align Joint 1 Y-axis generally towards target
-          // But we also need to account for the bend.
-          
-          // Analytic solution for interior angles
-          // Cosine Rule: c^2 = a^2 + b^2 - 2ab cos(C)
-          // dist^2 = l1^2 + l2^2 - 2*l1*l2*cos(angle_at_knee_internal)
-          // cos(knee) = (l1^2 + l2^2 - dist^2) / (2*l1*l2)
           const cosKnee = (l1*l1 + l2*l2 - dist*dist) / (2*l1*l2);
           const kneeAngleInternal = Math.acos(Math.max(-1, Math.min(1, cosKnee)));
-          const kneeBend = Math.PI - kneeAngleInternal; // Bend from straight (0)
-          
-          // Rotation for Joint 2 (Knee)
-          // It rotates around Z axis in local space
-          // Note: joint2 is child of joint1.
-          joint2.rotation.set(kneeBend, 0, 0); // Assuming bend is on X axis for this model setup? 
-          // Wait, model was: pivot rotation Y, then rotation Z. 
-          // Let's check model structure. createLimb uses Z for vertical angle.
-          // Let's try setting rotation.z for knee bend? Or rotation.x?
-          // Based on createLimb: segment grows in Y. Pivot rotates Z.
-          // So Joint 2 should rotate around Z or X to bend. 
-          // Let's assume Z for "hinge".
+          const kneeBend = Math.PI - kneeAngleInternal; 
           joint2.rotation.set(0, 0, kneeBend); 
 
-          // Rotation for Joint 1
-          // Needs to point towards target, corrected for the bend.
-          // The limb effectively forms a triangle. The angle offset at Joint 1 is:
-          // l2^2 = l1^2 + dist^2 - 2*l1*dist*cos(alpha)
           const cosAlpha = (l1*l1 + dist*dist - l2*l2) / (2*l1*dist);
           const alpha = Math.acos(Math.max(-1, Math.min(1, cosAlpha)));
-          
-          // Now, align Joint 1 to point to target, then back off by alpha.
-          // Converting global direction to local parent space is hard.
-          // Easiest approach: LookAt logic using helper matrices.
-          
           const parent = joint1.parent!;
           const localTarget = finalTarget.clone();
           parent.worldToLocal(localTarget);
-          
-          // Construct orientation
-          // Point Joint 1 Y-axis to localTarget
           const targetDir = localTarget.clone().normalize();
           const q1 = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), targetDir);
-          
-          // Add the alpha offset. We need to rotate 'back' by alpha in the plane of the bend.
-          // For simplicity in this "Wobbly" app, let's just point straight and bend knee.
-          // It's a stick figure, exact analytic plane retention isn't critical.
-          // To make it look natural, just Point Joint 1 at target, then rotate by -alpha on the bend axis.
           const qBend = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -alpha); 
           joint1.quaternion.copy(q1.multiply(qBend));
           
       } else if (dragModeRef.current === 'joint_rotate') {
-          // --- Simple Look At / Lever Drag ---
-          // Rotate the dragged joint (Joint 1 or Joint 2) to look at cursor
           const object = dragTargetRef.current;
           const parent = object.parent!;
           const localPoint = targetPoint.clone();
           parent.worldToLocal(localPoint);
-          
-          // Just align Y axis (limb axis) to the point
           const dir = localPoint.normalize();
           const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
           object.quaternion.copy(q);
@@ -703,7 +616,7 @@ const App = () => {
       if (visualMesh.parent?.userData.isJoint) setSelectedId(visualMesh.parent.userData.id);
   };
 
-  // --- Magic Pose 2.0 (2D -> 3D Reconstruction) ---
+  // --- Magic Pose 2.0 ---
   const analyzeSketchAndApply = async () => {
       if (!canvasRef.current) return;
       setIsGenerating(true);
@@ -716,8 +629,8 @@ const App = () => {
         
         const prompt = `
           Analyze this 2D stick figure sketch.
-          There are 8 limbs. For EACH limb (0 to 7), identify the 2D coordinates of the "knee" (mid-joint) and the "tip" (end).
-          Normalize coordinates to 0-1 range (0,0 is top-left).
+          There are 8 limbs radiating from the Red center dot.
+          For EACH limb (0 to 7), find the Blue dot (knee) and Green dot (tip).
           
           Return JSON:
           {
@@ -726,8 +639,7 @@ const App = () => {
               ...
             ]
           }
-          Limb 0-3: Arms/Upper. Limb 4-7: Legs/Lower.
-          Important: Simply trace the visual lines.
+          Normalize coordinates to 0-1 range.
         `;
 
         const response = await ai.models.generateContent({
@@ -740,14 +652,9 @@ const App = () => {
         const result = JSON.parse(text);
         
         if (result.limbs && creatureRef.current) {
-            // Reconstruct 3D from 2D points
-            const width = 20; // Approx world width at z=0 for ortho camera
+            const width = 20; 
             const height = width / (window.innerWidth/window.innerHeight);
             const aspect = window.innerWidth/window.innerHeight;
-            
-            // We need to map 0..1 to world coordinates
-            // Camera is at 0,0,20. Looking at 0,0,0.
-            // Ortho scale depends on frustum size (12).
             const frustumHeight = 12;
             const frustumWidth = frustumHeight * aspect;
 
@@ -757,60 +664,43 @@ const App = () => {
                 const j2 = creatureRef.current!.getObjectByName(`limb_${i}_joint_2`);
                 if (!j1 || !j2) return;
 
-                // 1. Get Root World Pos (Start of limb)
-                const rootPos = new THREE.Vector3();
-                j1.getWorldPosition(rootPos);
-                
-                // 2. Convert 2D Knee to 3D Target on plane Z=rootPos.z
-                // Map 0..1 to -Width/2 .. Width/2
                 const kneeX = (l.knee[0] - 0.5) * frustumWidth; 
                 const kneeY = -(l.knee[1] - 0.5) * frustumHeight;
-                const kneePos = new THREE.Vector3(kneeX, kneeY, 0); // Assume flat depth for sketching
+                const kneePos = new THREE.Vector3(kneeX, kneeY, 0); 
                 
-                // 3. Convert 2D Tip
                 const tipX = (l.tip[0] - 0.5) * frustumWidth;
                 const tipY = -(l.tip[1] - 0.5) * frustumHeight;
                 const tipPos = new THREE.Vector3(tipX, tipY, 0);
 
-                // 4. Orient Joint 1 to point to Knee
-                // Convert kneePos to j1 parent local space
                 const localKnee = kneePos.clone();
                 j1.parent!.worldToLocal(localKnee);
                 const dir1 = localKnee.normalize();
                 j1.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir1);
 
-                // 5. Orient Joint 2 to point to Tip
-                // Update j2 world matrix after j1 rotation
                 j1.updateWorldMatrix(true, false);
-                // Get Knee World Pos (which is j1 position + offset? No, j2 is at end of j1 segment)
                 const kneeWorldActual = new THREE.Vector3();
                 j2.getWorldPosition(kneeWorldActual);
                 
-                // Vector from Actual Knee to Target Tip
                 const dir2Global = new THREE.Vector3().subVectors(tipPos, kneeWorldActual).normalize();
-                
-                // Convert to j2 parent local space (which is j1 space)
-                // Actually j2 is child of j1's wrapper chain.
-                // We can just calculate rotation in world space and apply inverse parent
-                const qWorld = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir2Global); // Assuming j2 default up is Y
+                const qWorld = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir2Global); 
                 const parentQ = new THREE.Quaternion();
                 j2.parent!.getWorldQuaternion(parentQ);
                 j2.quaternion.copy(parentQ.invert().multiply(qWorld));
             });
-            
             if (controlsRef.current) controlsRef.current.reset();
         }
         setIsCanvasMode(false);
         setStrokeCount(0);
+        strokesRef.current = [];
       } catch (err) {
           console.error(err);
           setStrokeCount(0);
+          strokesRef.current = [];
       } finally {
           setIsGenerating(false);
       }
   };
 
-  // --- Canvas Logic ---
   const handleResize = useCallback(() => {
     if (cameraRef.current && rendererRef.current) {
       const frustumSize = 12;
@@ -825,12 +715,54 @@ const App = () => {
     if (canvasRef.current) {
         canvasRef.current.width = window.innerWidth;
         canvasRef.current.height = window.innerHeight;
+        redrawCanvas();
     }
   }, []);
   useEffect(() => {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [handleResize]);
+
+  const redrawCanvas = () => {
+     if (!canvasRef.current || !ctxRef.current) return;
+     const ctx = ctxRef.current;
+     const w = canvasRef.current.width;
+     const h = canvasRef.current.height;
+     const cx = w / 2;
+     const cy = h / 2;
+
+     ctx.clearRect(0, 0, w, h);
+
+     // Draw Center Red Dot
+     ctx.fillStyle = '#FF3B30';
+     ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI*2); ctx.fill();
+
+     // Draw Saved Strokes
+     ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.lineWidth = 4; ctx.strokeStyle = "black";
+     
+     strokesRef.current.forEach(stroke => {
+         if (stroke.points.length < 2) return;
+         ctx.beginPath();
+         ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+         stroke.points.forEach(p => ctx.lineTo(p.x, p.y));
+         ctx.stroke();
+
+         // Knee Dot
+         ctx.fillStyle = '#007AFF';
+         ctx.beginPath(); ctx.arc(stroke.knee.x, stroke.knee.y, 6, 0, Math.PI*2); ctx.fill();
+         // Tip Dot
+         ctx.fillStyle = '#34C759';
+         ctx.beginPath(); ctx.arc(stroke.tip.x, stroke.tip.y, 6, 0, Math.PI*2); ctx.fill();
+     });
+
+     // Draw Current Stroke
+     if (currentStrokeRef.current.length > 0) {
+         ctx.beginPath();
+         ctx.moveTo(currentStrokeRef.current[0].x, currentStrokeRef.current[0].y);
+         currentStrokeRef.current.forEach(p => ctx.lineTo(p.x, p.y));
+         ctx.stroke();
+     }
+  };
 
   useEffect(() => {
     if (isCanvasMode && canvasRef.current) {
@@ -839,35 +771,89 @@ const App = () => {
         canvas.height = window.innerHeight;
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.lineWidth = 4; ctx.strokeStyle = "black";
           ctxRef.current = ctx;
+          redrawCanvas();
         }
     }
   }, [isCanvasMode]);
 
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
-      isDrawingRef.current = true;
+      if (!ctxRef.current || !canvasRef.current) return;
       const { x, y } = getCoords(e);
-      ctxRef.current?.beginPath(); ctxRef.current?.moveTo(x, y);
+      const w = canvasRef.current.width;
+      const h = canvasRef.current.height;
+      const cx = w / 2;
+      const cy = h / 2;
+
+      // Distance check to center
+      const dist = Math.sqrt(Math.pow(x - cx, 2) + Math.pow(y - cy, 2));
+      
+      // Allow start if within reasonable distance (e.g. 80px) or force snapping to center?
+      // Prompt says "draw ... from this point". We'll force the start point to be center.
+      isDrawingRef.current = true;
+      currentStrokeRef.current = [{x: cx, y: cy}, {x, y}];
+      redrawCanvas();
   };
+
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
       if (!isDrawingRef.current || !ctxRef.current) return;
       const { x, y } = getCoords(e);
-      ctxRef.current.lineTo(x, y); ctxRef.current.stroke();
+      currentStrokeRef.current.push({x, y});
+      redrawCanvas();
   };
+
   const stopDrawing = () => {
       if (!isDrawingRef.current) return;
-      isDrawingRef.current = false; ctxRef.current?.closePath();
-      const newCount = strokeCount + 1;
+      isDrawingRef.current = false;
+      
+      const points = currentStrokeRef.current;
+      if (points.length < 5) {
+          currentStrokeRef.current = [];
+          redrawCanvas();
+          return;
+      }
+
+      const start = points[0];
+      const tip = points[points.length - 1];
+
+      // Estimate Knee (Point farthest from line start-tip)
+      let maxDist = 0;
+      let knee = points[Math.floor(points.length / 2)];
+      
+      // Line equation Ax + By + C = 0
+      const A = start.y - tip.y;
+      const B = tip.x - start.x;
+      const C = start.x * tip.y - tip.x * start.y;
+      const denom = Math.sqrt(A*A + B*B);
+
+      if (denom > 1) { // Avoid divide by zero for super short lines
+          points.forEach(p => {
+              const d = Math.abs(A*p.x + B*p.y + C) / denom;
+              if (d > maxDist) {
+                  maxDist = d;
+                  knee = p;
+              }
+          });
+      }
+
+      const newStroke: Stroke = { points: [...points], knee, tip };
+      strokesRef.current.push(newStroke);
+      currentStrokeRef.current = [];
+      
+      const newCount = strokesRef.current.length;
       setStrokeCount(newCount);
+      redrawCanvas();
+
       if (newCount === 8) analyzeSketchAndApply();
   };
+
   const clearCanvas = () => {
-      if (canvasRef.current && ctxRef.current) {
-          ctxRef.current.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-          setStrokeCount(0);
-      }
+      strokesRef.current = [];
+      currentStrokeRef.current = [];
+      setStrokeCount(0);
+      redrawCanvas();
   };
+
   const getCoords = (e: React.MouseEvent | React.TouchEvent) => {
       if ("touches" in e) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
       return { x: e.clientX, y: e.clientY };
@@ -888,11 +874,9 @@ const App = () => {
   const isDark = theme === 'dark';
   const bgClass = isDark ? 'bg-black text-white' : 'bg-[#F2F2F7] text-black';
   
-  // Scaled down UI to approx 75%
-  // w-12 -> w-9 (3rem -> 2.25rem)
-  // w-10 -> w-8 (2.5rem -> 2rem)
-  const iconBtnClass = (active: boolean) => `flex items-center justify-center w-9 h-9 rounded-full transition-all active:scale-95 ${active ? (isDark ? 'bg-white text-black' : 'bg-black text-white') : (isDark ? 'bg-neutral-800 text-neutral-400' : 'bg-white text-neutral-400')}`;
-  const secondaryBtnClass = `flex items-center justify-center w-8 h-8 rounded-full transition-all active:scale-90 ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`;
+  // UI classes scaled down ~75%
+  const iconBtnClass = (active: boolean) => `flex items-center justify-center w-7 h-7 rounded-full transition-all active:scale-95 ${active ? (isDark ? 'bg-white text-black' : 'bg-black text-white') : (isDark ? 'bg-neutral-800 text-neutral-400' : 'bg-white text-neutral-400')}`;
+  const secondaryBtnClass = `flex items-center justify-center w-6 h-6 rounded-full transition-all active:scale-90 ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`;
   const pillContainerClass = `flex items-center gap-1 p-1 rounded-full border backdrop-blur-md ${isDark ? 'bg-neutral-900/80 border-white/5' : 'bg-white/80 border-black/5'}`;
 
   return (
@@ -916,11 +900,11 @@ const App = () => {
           <div className="absolute inset-0 z-50 bg-white cursor-crosshair touch-none">
               <canvas ref={canvasRef} className="w-full h-full" onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing} />
               <div className="absolute top-safe right-4 mt-12 flex flex-col gap-4">
-                  <button onClick={() => { setIsCanvasMode(false); setStrokeCount(0); }} className="bg-black/10 hover:bg-black/20 p-3 rounded-full text-black"><X size={24} /></button>
-                  <button onClick={clearCanvas} className="bg-black/10 hover:bg-black/20 p-3 rounded-full text-black"><Trash2 size={24} /></button>
+                  <button onClick={() => { setIsCanvasMode(false); setStrokeCount(0); strokesRef.current=[]; }} className="bg-black/10 hover:bg-black/20 p-2 rounded-full text-black"><X size={20} /></button>
+                  <button onClick={clearCanvas} className="bg-black/10 hover:bg-black/20 p-2 rounded-full text-black"><Trash2 size={20} /></button>
               </div>
               <div className="absolute top-12 left-0 right-0 flex justify-center pointer-events-none">
-                   <div className="bg-black/10 text-black px-4 py-2 rounded-full font-hand text-2xl font-bold">{isGenerating ? "..." : `${strokeCount} / 8`}</div>
+                   <div className="bg-black/10 text-black px-4 py-1 rounded-full font-hand text-xl font-bold">{isGenerating ? "..." : `${strokeCount} / 8`}</div>
               </div>
               <div className="absolute bottom-12 left-0 right-0 flex justify-center items-center pointer-events-none">
                  {isGenerating && (<div className={`pointer-events-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full font-bold shadow-none transition-all bg-gray-400 text-white`}><RefreshCcw className="animate-spin" size={20} /></div>)}
@@ -929,26 +913,26 @@ const App = () => {
       )}
 
        {!isCanvasMode && (
-       <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center gap-4 z-40 pointer-events-none">
+       <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center gap-3 z-40 pointer-events-none">
             <div className={`pointer-events-auto ${pillContainerClass}`}>
-                  <button onClick={copyPose} className={secondaryBtnClass}>{copied ? <Check size={14} className="text-green-500"/> : <Copy size={14} />}</button>
-                  <button onClick={generateRandomPose} className={secondaryBtnClass}><Shuffle size={14} /></button>
-                  <button onClick={saveSnapshot} className={secondaryBtnClass}><Download size={14} /></button>
+                  <button onClick={copyPose} className={secondaryBtnClass}>{copied ? <Check size={12} className="text-green-500"/> : <Copy size={12} />}</button>
+                  <button onClick={generateRandomPose} className={secondaryBtnClass}><Shuffle size={12} /></button>
+                  <button onClick={saveSnapshot} className={secondaryBtnClass}><Download size={12} /></button>
             </div>
-            <div className="flex items-center gap-4 pointer-events-auto">
+            <div className="flex items-center gap-3 pointer-events-auto">
                  <button 
                      onClick={() => setOrbitEnabled(!orbitEnabled)} 
                      onDoubleClick={(e) => { e.stopPropagation(); setShowLabels(prev => !prev); }}
                      className={iconBtnClass(orbitEnabled)}
                  >
-                    <Eye size={18} strokeWidth={2} />
+                    <Eye size={16} strokeWidth={2} />
                  </button>
-                 <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}><Hand size={18} strokeWidth={2} /></button>
-                 <button onClick={snapToGrid} className={iconBtnClass(false)}><Grid3X3 size={18} strokeWidth={2} /></button>
-                 <div className="w-px h-6 bg-current opacity-20 mx-1"></div>
-                 <button onClick={() => { setIsCanvasMode(true); setStrokeCount(0); }} className={iconBtnClass(false)}><Pencil size={18} strokeWidth={2} /></button>
+                 <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}><Hand size={16} strokeWidth={2} /></button>
+                 <button onClick={snapToGrid} className={iconBtnClass(false)}><Grid3X3 size={16} strokeWidth={2} /></button>
+                 <div className="w-px h-5 bg-current opacity-20 mx-0.5"></div>
+                 <button onClick={() => { setIsCanvasMode(true); setStrokeCount(0); strokesRef.current = []; }} className={iconBtnClass(false)}><Pencil size={16} strokeWidth={2} /></button>
             </div>
-            <button onClick={resetPose} className={`pointer-events-auto flex items-center justify-center w-6 h-6 rounded-full opacity-50 hover:opacity-100 transition-opacity ${isDark ? 'bg-white/10 text-white' : 'bg-black/10 text-black'}`}><RefreshCcw size={12} /></button>
+            <button onClick={resetPose} className={`pointer-events-auto flex items-center justify-center w-5 h-5 rounded-full opacity-50 hover:opacity-100 transition-opacity ${isDark ? 'bg-white/10 text-white' : 'bg-black/10 text-black'}`}><RefreshCcw size={10} /></button>
        </div>
        )}
     </div>
