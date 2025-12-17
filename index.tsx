@@ -101,10 +101,7 @@ const PRESET_POSE_2: PoseData = {
   "limb_7_joint_2": { "x": 0.775, "y": 0.628, "z": 0.961 }
 };
 
-const SYSTEM_PRESETS: SavedPose[] = [
-    { id: 'preset-1', name: 'Preset 1', pose: PRESET_POSE, timestamp: 0, type: 'preset' },
-    { id: 'preset-2', name: 'Preset 2', pose: PRESET_POSE_2, timestamp: 0, type: 'preset' }
-];
+const SYSTEM_PRESETS: SavedPose[] = [];
 
 const generateLabels = () => {
     // Top Right (Limb 0) and Bottom Left (Limb 6) based on the sparse sketch
@@ -332,8 +329,8 @@ const App = () => {
         seg1.position.y = seg1Length / 2;
         seg1.name = "visual";
         
-        // Reduced Hitbox Size (50% reduction)
-        const seg1HitboxGeo = new THREE.BoxGeometry(0.12, seg1Length, 0.12);
+        // Enlarged Hitbox Size for easier grabbing
+        const seg1HitboxGeo = new THREE.BoxGeometry(0.25, seg1Length, 0.25);
         const seg1Hitbox = new THREE.Mesh(seg1HitboxGeo, invisibleMaterialRef.current);
         seg1Hitbox.position.y = seg1Length / 2;
         seg1Hitbox.userData = { isPart: true, isHitbox: true, type: 'joint', limbIndex: index, jointIndex: 1 };
@@ -352,8 +349,8 @@ const App = () => {
         joint.visible = false; 
         seg1.add(joint);
         
-        // Knee Hitbox - Reduced
-        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), invisibleMaterialRef.current);
+        // Knee Hitbox - Enlarged
+        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), invisibleMaterialRef.current);
         kneeHitbox.position.y = seg1Length / 2;
         kneeHitbox.userData = { isPart: true, isHitbox: true, type: 'knee', limbIndex: index };
         seg1.add(kneeHitbox);
@@ -366,15 +363,16 @@ const App = () => {
         seg2.position.y = seg2Length / 2;
         seg2.name = "visual";
 
-        // Tip Hitbox - Reduced
-        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), invisibleMaterialRef.current);
-        tipHitbox.position.y = seg2Length; // At the very end
+        // Tip Hitbox - Enlarged & Position Fixed
+        // Geometry was centered in seg2, so visual tip is at seg2Length/2 in seg2 local space.
+        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), invisibleMaterialRef.current);
+        tipHitbox.position.y = seg2Length / 2; // Fixed: Position at the tip of the cone
         tipHitbox.userData = { isPart: true, isHitbox: true, type: 'tip', limbIndex: index };
         tipHitbox.name = "hitbox_tip";
         seg2.add(tipHitbox);
 
-        // Standard segment hitbox - Reduced
-        const seg2HitboxGeo = new THREE.ConeGeometry(0.15, seg2Length, 4);
+        // Standard segment hitbox - Enlarged
+        const seg2HitboxGeo = new THREE.ConeGeometry(0.25, seg2Length, 8);
         const seg2Hitbox = new THREE.Mesh(seg2HitboxGeo, invisibleMaterialRef.current);
         seg2Hitbox.position.y = seg2Length / 2;
         seg2Hitbox.userData = { isPart: true, isHitbox: true, type: 'segment', limbIndex: index, jointIndex: 2 };
@@ -848,9 +846,7 @@ const App = () => {
                     seg2Mesh.position.y = (LIMB_SEGMENT_2_LENGTH * r2) / 2;
                     // Move tip hitbox
                     const tipHitbox = seg2Mesh.children.find(c => c.name === 'hitbox_tip');
-                    if (tipHitbox) tipHitbox.position.y = LIMB_SEGMENT_2_LENGTH; // Relative to scaled mesh, so position 2.0 * r2
-                    // Wait, if mesh is scaled by r2, child position y=2.0 becomes 2.0*r2 in world. 
-                    // So we keep local y constant.
+                    if (tipHitbox) tipHitbox.position.y = (LIMB_SEGMENT_2_LENGTH * r2) / 2; 
                 }
 
                 // Apply Rotations (IK)
