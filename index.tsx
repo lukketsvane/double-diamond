@@ -14,7 +14,8 @@ import {
   Pencil,
   Sparkles,
   X,
-  Trash2
+  Trash2,
+  Grid3X3
 } from "lucide-react";
 
 // --- Types ---
@@ -59,6 +60,26 @@ const PRESET_POSE: PoseData = {
   "limb_7_joint_1": { "x": -0.582, "y": 1.014, "z": 1.42 },
   "limb_7_joint_2": { "x": -0.499, "y": 0.572, "z": -1.179 }
 };
+
+const PRESET_POSE_2: PoseData = {
+  "limb_0_joint_1": { "x": -0.1, "y": 0.051, "z": 1.493 },
+  "limb_0_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_1_joint_1": { "x": 0.287, "y": 1.012, "z": 1.65 },
+  "limb_1_joint_2": { "x": 1.288, "y": -0.117, "z": -0.375 },
+  "limb_2_joint_1": { "x": -0.109, "y": -0.05, "z": 1.444 },
+  "limb_2_joint_2": { "x": -0.104, "y": -0.141, "z": 1.587 },
+  "limb_3_joint_1": { "x": 0.065, "y": 1.066, "z": 2.036 },
+  "limb_3_joint_2": { "x": 1.141, "y": -0.213, "z": -0.792 },
+  "limb_4_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_4_joint_2": { "x": 0.113, "y": -0.027, "z": -1.195 },
+  "limb_5_joint_1": { "x": 0.611, "y": 0.557, "z": 0.647 },
+  "limb_5_joint_2": { "x": -1.813, "y": -0.873, "z": -0.359 },
+  "limb_6_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_6_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_7_joint_1": { "x": -0.582, "y": 1.014, "z": 1.42 },
+  "limb_7_joint_2": { "x": 0.775, "y": 0.628, "z": 0.961 }
+};
+
 
 // Generate labels: Smarter, less cluttered logic.
 const generateLabels = () => {
@@ -411,7 +432,8 @@ const App = () => {
 
   const generateRandomPose = () => {
      const strategies = [
-         () => PRESET_POSE, // Add the specific preset to the shuffle
+         () => PRESET_POSE, 
+         () => PRESET_POSE_2,
          () => {
              const j1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
              const j2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
@@ -431,6 +453,22 @@ const App = () => {
      ];
      const strategy = strategies[Math.floor(Math.random() * strategies.length)];
      if (creatureRef.current) applyPoseToRef(strategy(), creatureRef.current);
+  };
+
+  const snapToGrid = () => {
+    if (!creatureRef.current) return;
+    // Snap to 15 degree increments (PI/12 radians)
+    const STEP = Math.PI / 12; 
+    
+    creatureRef.current.traverse((obj) => {
+        if (obj.userData.isJoint) {
+            const { x, y, z } = obj.rotation;
+            
+            const snap = (val: number) => Math.round(val / STEP) * STEP;
+            
+            obj.rotation.set(snap(x), snap(y), snap(z));
+        }
+    });
   };
 
   const saveSnapshot = () => {
@@ -873,6 +911,9 @@ const App = () => {
                  </button>
                  <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}>
                     <Hand size={20} strokeWidth={2} />
+                 </button>
+                 <button onClick={snapToGrid} className={iconBtnClass(false)}>
+                    <Grid3X3 size={20} strokeWidth={2} />
                  </button>
                  <div className="w-px h-6 bg-current opacity-20 mx-1"></div>
                  <button onClick={() => { setIsCanvasMode(true); setStrokeCount(0); }} className={iconBtnClass(false)}>
