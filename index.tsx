@@ -17,7 +17,8 @@ import {
   Grid3X3,
   Moon,
   Sun,
-  Tag
+  Tag,
+  Image as ImageIcon
 } from "lucide-react";
 
 // --- Types ---
@@ -28,6 +29,14 @@ type Stroke = {
     knee: {x: number, y: number};
     tip: {x: number, y: number};
 };
+interface SavedPose {
+    id: string;
+    name: string;
+    pose: PoseData;
+    thumbnail?: string;
+    timestamp: number;
+    type: 'preset' | 'generated' | 'manual';
+}
 
 // --- Constants ---
 const LIMB_SEGMENT_1_LENGTH = 1.5;
@@ -92,6 +101,11 @@ const PRESET_POSE_2: PoseData = {
   "limb_7_joint_2": { "x": 0.775, "y": 0.628, "z": 0.961 }
 };
 
+const SYSTEM_PRESETS: SavedPose[] = [
+    { id: 'preset-1', name: 'Preset 1', pose: PRESET_POSE, timestamp: 0, type: 'preset' },
+    { id: 'preset-2', name: 'Preset 2', pose: PRESET_POSE_2, timestamp: 0, type: 'preset' }
+];
+
 const generateLabels = () => {
     // Top Right (Limb 0) and Bottom Left (Limb 6) based on the sparse sketch
     return [
@@ -104,6 +118,7 @@ const generateLabels = () => {
 const INDIVIDUAL_LABELS = generateLabels();
 
 const CACHE_KEY = "mento_pose_cache";
+const SAVED_POSES_KEY = "mento_saved_poses_v1";
 
 const createWobblyGeometry = (baseGeo: THREE.BufferGeometry, magnitude: number = 0.015) => {
   const geo = baseGeo.clone();
@@ -144,6 +159,7 @@ const App = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isCanvasMode, setIsCanvasMode] = useState(false);
+  const [isGalleryMode, setIsGalleryMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
   
@@ -160,7 +176,14 @@ const App = () => {
   const [grabEnabled, setGrabEnabled] = useState(true);
   const [snapEnabled, setSnapEnabled] = useState(false);
   
-  const [userPresets, setUserPresets] = useState<PoseData[]>([]);
+  const [savedPoses, setSavedPoses] = useState<SavedPose[]>(() => {
+      try {
+          const saved = localStorage.getItem(SAVED_POSES_KEY);
+          return saved ? JSON.parse(saved) : [];
+      } catch (e) {
+          return [];
+      }
+  });
 
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -204,6 +227,10 @@ const App = () => {
       setTheme(next);
       localStorage.setItem('theme', next);
   };
+
+  useEffect(() => {
+    localStorage.setItem(SAVED_POSES_KEY, JSON.stringify(savedPoses));
+  }, [savedPoses]);
 
   useEffect(() => {
     const isDark = theme === 'dark';
@@ -491,7 +518,7 @@ const App = () => {
      const strategies = [
          () => PRESET_POSE, 
          () => PRESET_POSE_2,
-         ...userPresets.map(p => () => p),
+         ...savedPoses.map(p => () => p.pose),
          () => {
              const j1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
              const j2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
@@ -530,6 +557,20 @@ const App = () => {
           link.click();
       }
   }
+  
+  const extractPose = (group: THREE.Group): PoseData => {
+      const poseData: PoseData = {};
+      group.traverse((obj) => {
+          if (obj.userData.isJoint && obj.userData.id) {
+              poseData[obj.userData.id] = { 
+                  x: Number(obj.rotation.x.toFixed(3)), 
+                  y: Number(obj.rotation.y.toFixed(3)), 
+                  z: Number(obj.rotation.z.toFixed(3)) 
+              };
+          }
+      });
+      return poseData;
+  };
 
   const snapCameraToNearestView = () => {
       if (!cameraRef.current || !controlsRef.current) return;
@@ -813,6 +854,27 @@ const App = () => {
                 j2.quaternion.copy(parentQ.invert().multiply(qWorld));
             });
             if (controlsRef.current) controlsRef.current.reset();
+            
+            // --- Auto-Save Generated Pose ---
+            // Wait for next frame to ensure rendering is updated
+            requestAnimationFrame(() => {
+                if (rendererRef.current && sceneRef.current && cameraRef.current) {
+                    rendererRef.current.render(sceneRef.current, cameraRef.current);
+                    const thumb = rendererRef.current.domElement.toDataURL("image/png", 0.5);
+                    const newPoseData = extractPose(creatureRef.current!);
+                    
+                    const newSavedPose: SavedPose = {
+                        id: crypto.randomUUID(),
+                        name: `Magic Pose ${new Date().toLocaleTimeString()}`,
+                        pose: newPoseData,
+                        thumbnail: thumb,
+                        timestamp: Date.now(),
+                        type: 'generated'
+                    };
+                    
+                    setSavedPoses(prev => [newSavedPose, ...prev]);
+                }
+            });
         }
         setIsCanvasMode(false);
         setStrokeCount(0);
@@ -996,8 +1058,22 @@ const App = () => {
           }
       });
       
-      // Save to user presets
-      setUserPresets(prev => [...prev, poseData]);
+      // Also save to internal presets as "Manual Save"
+      // Force render to capture correct frame
+      if (rendererRef.current && sceneRef.current && cameraRef.current) {
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+          const thumb = rendererRef.current.domElement.toDataURL("image/png", 0.5);
+          
+          const newSavedPose: SavedPose = {
+            id: crypto.randomUUID(),
+            name: `Pose ${new Date().toLocaleTimeString()}`,
+            pose: poseData,
+            thumbnail: thumb,
+            timestamp: Date.now(),
+            type: 'manual'
+          };
+          setSavedPoses(prev => [newSavedPose, ...prev]);
+      }
 
       const json = JSON.stringify(poseData, null, 2);
       try { await navigator.clipboard.writeText(json); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (err) { console.error(err); }
@@ -1011,6 +1087,8 @@ const App = () => {
   const secondaryBtnClass = `flex items-center justify-center w-6 h-6 rounded-full transition-all active:scale-90 ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`;
   const pillContainerClass = `flex items-center gap-1 p-1 rounded-full border backdrop-blur-md ${isDark ? 'bg-neutral-900/80 border-white/5' : 'bg-white/80 border-black/5'}`;
 
+  const allPoses = [...SYSTEM_PRESETS, ...savedPoses];
+
   return (
     <div className={`relative w-full h-full overflow-hidden select-none transition-colors duration-500 ${bgClass}`}>
       <div 
@@ -1022,11 +1100,49 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
       
-      {!isCanvasMode && INDIVIDUAL_LABELS.map((item, i) => (
+      {!isCanvasMode && !isGalleryMode && INDIVIDUAL_LABELS.map((item, i) => (
           <div key={`${item.limbIndex}-${item.jointIndex}`} ref={el => { labelRefs.current[i] = el; }} className={`absolute top-0 left-0 text-2xl font-hand leading-none pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`} style={{ opacity: 0 }}>
               {item.text}
           </div>
       ))}
+
+      {isGalleryMode && (
+         <div className={`absolute inset-0 z-50 flex flex-col p-4 overflow-hidden ${bgClass} ${isDark ? 'bg-black/95' : 'bg-[#F2F2F7]/95'} backdrop-blur-sm`}>
+             <div className="flex justify-between items-center mb-6">
+                 <h2 className="text-xl font-bold font-hand">Pose Gallery</h2>
+                 <button onClick={() => setIsGalleryMode(false)} className={`${isDark ? 'bg-white/10 text-white' : 'bg-black/10 text-black'} p-2 rounded-full`}><X size={20} /></button>
+             </div>
+             <div className="flex-1 overflow-y-auto">
+                 <div className="grid grid-cols-3 gap-2 pb-20">
+                     {allPoses.map((item) => (
+                         <button 
+                             key={item.id}
+                             onClick={() => {
+                                 if (creatureRef.current) applyPoseToRef(item.pose, creatureRef.current);
+                                 setIsGalleryMode(false);
+                             }}
+                             className={`relative aspect-square rounded-xl overflow-hidden border transition-transform active:scale-95 ${isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'}`}
+                         >
+                            {item.thumbnail ? (
+                                <img src={item.thumbnail} alt={item.name} className="w-full h-full object-cover" />
+                            ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center p-2 opacity-50">
+                                    <Tag size={24} />
+                                    <span className="text-[10px] mt-1 text-center leading-tight">{item.name}</span>
+                                </div>
+                            )}
+                            {item.type === 'preset' && (
+                                <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-blue-500"></div>
+                            )}
+                            {item.type === 'generated' && (
+                                <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-purple-500"></div>
+                            )}
+                         </button>
+                     ))}
+                 </div>
+             </div>
+         </div>
+      )}
 
       {isCanvasMode && (
           <div className={`absolute inset-0 z-50 cursor-crosshair touch-none ${bgClass}`}>
@@ -1041,7 +1157,7 @@ const App = () => {
           </div>
       )}
 
-       {!isCanvasMode && (
+       {!isCanvasMode && !isGalleryMode && (
        <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center gap-3 z-40 pointer-events-none">
             <div className={`pointer-events-auto ${pillContainerClass}`}>
                   <button onClick={copyPose} className={secondaryBtnClass}>{copied ? <Check size={12} className="text-green-500"/> : <Copy size={12} />}</button>
@@ -1066,6 +1182,7 @@ const App = () => {
                     {isDark ? <Moon size={16} strokeWidth={2} /> : <Sun size={16} strokeWidth={2} />}
                  </button>
                  <button onClick={() => setSnapEnabled(!snapEnabled)} className={iconBtnClass(snapEnabled)}><Grid3X3 size={16} strokeWidth={2} /></button>
+                 <button onClick={() => setIsGalleryMode(true)} className={iconBtnClass(false)}><ImageIcon size={16} strokeWidth={2} /></button>
                  <div className="w-px h-5 bg-current opacity-20 mx-0.5"></div>
                  <button onClick={() => { setIsCanvasMode(true); setStrokeCount(0); strokesRef.current = []; }} className={iconBtnClass(false)}><Pencil size={16} strokeWidth={2} /></button>
             </div>
