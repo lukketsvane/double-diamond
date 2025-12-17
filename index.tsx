@@ -151,9 +151,15 @@ const App = () => {
   const [isCanvasMode, setIsCanvasMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
-  const showLabelsRef = useRef(true); // Ref to track visibility in animation loop
+  
+  // Use refs to track state in animation loop and event handlers to avoid stale closures
+  const showLabelsRef = useRef(showLabels);
+  const isCanvasModeRef = useRef(isCanvasMode);
+  const isGeneratingRef = useRef(isGenerating);
 
   useEffect(() => { showLabelsRef.current = showLabels; }, [showLabels]);
+  useEffect(() => { isCanvasModeRef.current = isCanvasMode; }, [isCanvasMode]);
+  useEffect(() => { isGeneratingRef.current = isGenerating; }, [isGenerating]);
   
   const [orbitEnabled, setOrbitEnabled] = useState(true);
   const [grabEnabled, setGrabEnabled] = useState(true);
@@ -304,8 +310,8 @@ const App = () => {
         seg1.position.y = seg1Length / 2;
         seg1.name = "visual";
         
-        // Reduced Hitbox Size
-        const seg1HitboxGeo = new THREE.BoxGeometry(0.25, seg1Length, 0.25);
+        // Reduced Hitbox Size (50% reduction)
+        const seg1HitboxGeo = new THREE.BoxGeometry(0.12, seg1Length, 0.12);
         const seg1Hitbox = new THREE.Mesh(seg1HitboxGeo, invisibleMaterialRef.current);
         seg1Hitbox.position.y = seg1Length / 2;
         seg1Hitbox.userData = { isPart: true, isHitbox: true, type: 'joint', limbIndex: index, jointIndex: 1 };
@@ -325,7 +331,7 @@ const App = () => {
         seg1.add(joint);
         
         // Knee Hitbox - Reduced
-        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), invisibleMaterialRef.current);
+        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), invisibleMaterialRef.current);
         kneeHitbox.position.y = seg1Length / 2;
         kneeHitbox.userData = { isPart: true, isHitbox: true, type: 'knee', limbIndex: index };
         seg1.add(kneeHitbox);
@@ -339,14 +345,14 @@ const App = () => {
         seg2.name = "visual";
 
         // Tip Hitbox - Reduced
-        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8), invisibleMaterialRef.current);
+        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), invisibleMaterialRef.current);
         tipHitbox.position.y = seg2Length; // At the very end
         tipHitbox.userData = { isPart: true, isHitbox: true, type: 'tip', limbIndex: index };
         tipHitbox.name = "hitbox_tip";
         seg2.add(tipHitbox);
 
         // Standard segment hitbox - Reduced
-        const seg2HitboxGeo = new THREE.ConeGeometry(0.25, seg2Length, 4);
+        const seg2HitboxGeo = new THREE.ConeGeometry(0.15, seg2Length, 4);
         const seg2Hitbox = new THREE.Mesh(seg2HitboxGeo, invisibleMaterialRef.current);
         seg2Hitbox.position.y = seg2Length / 2;
         seg2Hitbox.userData = { isPart: true, isHitbox: true, type: 'segment', limbIndex: index, jointIndex: 2 };
@@ -389,7 +395,8 @@ const App = () => {
   }, []);
 
   const updateLabels = (creatureGroup: THREE.Group) => {
-    if (isCanvasMode) return;
+    // Check refs to avoid stale closures in animation loop
+    if (isCanvasModeRef.current) return;
     
     // First pass: collect potential labels
     const potentials: { id: number; x: number; y: number; z: number; el: HTMLDivElement }[] = [];
@@ -611,24 +618,6 @@ const App = () => {
           joint1.getWorldPosition(rootPos);
           const direction = new THREE.Vector3().subVectors(finalTarget, rootPos);
           let dist = direction.length();
-          
-          // Use current scale if possible to determine max length? 
-          // For simplicity we use standard length, or we could inspect the current positions.
-          // Since scaling is done via magic pose, assume standard for manual dragging unless we read current scale.
-          // Let's read current positions to infer length.
-          // Joint1 is at 0 local to parent.
-          const j2 = joint2 as THREE.Group;
-          // seg1 length approx = j2.position.y
-          // seg2 length approx = (j2 children visual).position.y * 2? 
-          // Actually, we can just use the standard length as the constraint for manual IK for now, 
-          // or assume the user wants to keep the Magic Pose length.
-          // Let's use the current physical length of segments.
-          const currentL1 = j2.position.y; // distance from J1 to J2
-          // To get L2, we need the tip hitbox position relative to J2.
-          const tip = j2.children.find(c => c.children.some(k => k.name==='hitbox_tip'))?.children.find(k => k.name==='hitbox_tip');
-          // Actually tip is child of seg2 visual mesh.
-          // Let's approximate L2 based on standard * scale. 
-          // Or simpler: just use dist.
           
           // Revert to standard lengths for IK calculation to keep it stable, 
           // as variable limb length IK is complex if we don't track the variable length.
@@ -892,7 +881,7 @@ const App = () => {
   }, [isCanvasMode]);
 
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
-      if (isGenerating) return; // Block drawing if generating
+      if (isGeneratingRef.current) return; // Block drawing if generating
       if (!ctxRef.current || !canvasRef.current) return;
       const { x, y } = getCoords(e);
       const w = canvasRef.current.width;
@@ -911,7 +900,7 @@ const App = () => {
   };
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
-      if (isGenerating) return; // Block drawing if generating
+      if (isGeneratingRef.current) return; // Block drawing if generating
       if (!isDrawingRef.current || !ctxRef.current) return;
       const { x, y } = getCoords(e);
       currentStrokeRef.current.push({x, y});
@@ -1012,7 +1001,7 @@ const App = () => {
       />
       
       {!isCanvasMode && INDIVIDUAL_LABELS.map((item, i) => (
-          <div key={`${item.limbIndex}-${item.jointIndex}`} ref={el => labelRefs.current[i] = el} className={`absolute top-0 left-0 text-2xl font-hand leading-none pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`} style={{ opacity: 0 }}>
+          <div key={`${item.limbIndex}-${item.jointIndex}`} ref={el => { labelRefs.current[i] = el; }} className={`absolute top-0 left-0 text-2xl font-hand leading-none pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`} style={{ opacity: 0 }}>
               {item.text}
           </div>
       ))}
