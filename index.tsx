@@ -10,7 +10,6 @@ import {
   Check,
   Shuffle,
   RefreshCcw,
-  Grid3x3,
   Download,
   Pencil,
   Sparkles,
@@ -580,12 +579,23 @@ const App = () => {
         const base64Data = dataUrl.split(",")[1];
         
         const prompt = `
-          Analyze this sketch of a abstract 8-limbed creature. 
-          Estimate the 3D rotations (x, y, z in radians) for the joints to match the sketch.
-          The structure has 16 joints in total, organized in 8 limbs.
-          The keys must be exactly: ${Object.keys(INITIAL_POSE).join(", ")}.
-          Return ONLY a JSON object with this structure.
+          Analyze this sketch of an abstract creature. It has a vertical diamond-like symmetry.
+          There are 8 limbs total.
+          Limbs 0, 1, 2, 3 are the UPPER limbs (top half).
+          Limbs 4, 5, 6, 7 are the LOWER limbs (bottom half).
+          Each limb has 2 joints. 
+          Joint 1 is the base (shoulder/hip). Joint 2 is the elbow/knee.
+          
+          Estimate the 3D local rotations (x, y, z in radians) for all 16 joints to match the pose in the sketch.
+          Return a JSON object where keys are "limb_N_joint_M" (0-7, 1-2) and values are objects with x, y, z.
         `;
+
+        // Explicitly define schema properties for all 16 joints to ensure valid JSON
+        const properties: any = {};
+        for(let i=0; i<8; i++) {
+            properties[`limb_${i}_joint_1`] = { type: Type.OBJECT, properties: { x: {type: Type.NUMBER}, y: {type: Type.NUMBER}, z: {type: Type.NUMBER} } };
+            properties[`limb_${i}_joint_2`] = { type: Type.OBJECT, properties: { x: {type: Type.NUMBER}, y: {type: Type.NUMBER}, z: {type: Type.NUMBER} } };
+        }
 
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
@@ -599,14 +609,9 @@ const App = () => {
                 responseMimeType: "application/json",
                 responseSchema: {
                   type: Type.OBJECT,
-                  description: "Pose data for the creature",
-                  properties: {
-                     // We allow any keys, but ideally we'd list them all. 
-                     // For brevity in this schema, we rely on the prompt to enforce keys.
-                     // But to be valid Typescript with this SDK we should try to be specific or use a loose object.
-                     // Using a loose structure for now as listing 48 props is verbose.
-                     limb_0_joint_1: { type: Type.OBJECT, properties: { x: {type: Type.NUMBER}, y: {type: Type.NUMBER}, z: {type: Type.NUMBER} } }
-                  }
+                  description: "Pose data for the 8-limbed creature",
+                  properties: properties,
+                  required: Object.keys(properties)
                 }
             }
         });
@@ -621,7 +626,7 @@ const App = () => {
         }
       } catch (err) {
           console.error("Failed to generate pose", err);
-          alert("Could not generate pose. Check API Key or try again.");
+          alert("Could not generate pose. Please check if the API Key is configured correctly in the environment.");
       } finally {
           setIsGenerating(false);
       }
@@ -783,10 +788,6 @@ const App = () => {
                     <Eye size={20} strokeWidth={2} />
                  </button>
                  
-                 <button onClick={() => { setOrbitEnabled(true); setGrabEnabled(true); }} className={iconBtnClass(orbitEnabled && grabEnabled)}>
-                    <Grid3x3 size={20} strokeWidth={2} />
-                 </button>
-
                  <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}>
                     <Hand size={20} strokeWidth={2} />
                  </button>
