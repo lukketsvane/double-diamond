@@ -754,8 +754,26 @@ const App = () => {
         if (!process.env.API_KEY) throw new Error("API Key missing");
         
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const dataUrl = canvasRef.current.toDataURL("image/png");
-        const base64Data = dataUrl.split(",")[1];
+        
+        // --- OPTIMIZATION START ---
+        // Resize image to max 512px width to reduce payload size (5-10x faster upload)
+        const targetWidth = 512;
+        const scale = targetWidth / canvasRef.current.width;
+        const targetHeight = canvasRef.current.height * scale;
+        
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = targetWidth;
+        tempCanvas.height = targetHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (tempCtx) {
+            // Draw white background
+            tempCtx.fillStyle = '#FFFFFF';
+            tempCtx.fillRect(0, 0, targetWidth, targetHeight);
+            tempCtx.drawImage(canvasRef.current, 0, 0, targetWidth, targetHeight);
+        }
+        
+        const base64Data = tempCanvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+        // --- OPTIMIZATION END ---
         
         const prompt = `
           Analyze this 2D stick figure sketch.
@@ -774,7 +792,7 @@ const App = () => {
 
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: { parts: [{ inlineData: { mimeType: "image/png", data: base64Data } }, { text: prompt }] },
+            contents: { parts: [{ inlineData: { mimeType: "image/jpeg", data: base64Data } }, { text: prompt }] },
             config: { responseMimeType: "application/json" }
         });
 
