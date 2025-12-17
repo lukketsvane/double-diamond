@@ -41,15 +41,14 @@ const INITIAL_POSE: PoseData = {
   "limb_7_joint_2": { "x": 0, "y": 0, "z": 1.57 }
 };
 
-// "Thighs" (Segment 1) are Define/Develop (Closest to core)
-// "Ligaments" (Segment 2) are Discover/Deploy (Outer)
-// Top Limbs (0-3): Discover (Outer) -> Define (Inner)
-// Bottom Limbs (4-7): Deploy (Outer) -> Develop (Inner)
-const LABELS = [
-  { name: "discover", limbs: [0, 1, 2, 3], segment: 2 },
-  { name: "define", limbs: [0, 1, 2, 3], segment: 1 },
-  { name: "develop", limbs: [4, 5, 6, 7], segment: 1 },
-  { name: "deploy", limbs: [4, 5, 6, 7], segment: 2 }
+// Label Configuration
+// Top Limbs (0-3): Outer = Discover, Inner = Define
+// Bottom Limbs (4-7): Outer = Deploy, Inner = Develop
+const PROCESS_LABELS = [
+  { text: "discover", limbs: [0, 1, 2, 3], jointIndex: 2 }, // Outer Segment
+  { text: "define",   limbs: [0, 1, 2, 3], jointIndex: 1 }, // Inner Segment
+  { text: "develop",  limbs: [4, 5, 6, 7], jointIndex: 1 }, // Inner Segment
+  { text: "deploy",   limbs: [4, 5, 6, 7], jointIndex: 2 }  // Outer Segment
 ];
 
 const COLORS = {
@@ -334,24 +333,22 @@ const App = () => {
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
         
-        // Update Labels based on segment centers
+        // Update Labels
         if (!isCanvasMode) {
-            LABELS.forEach((item, index) => {
+            PROCESS_LABELS.forEach((item, index) => {
                 const labelDiv = labelRefs.current[index];
                 if (!labelDiv || !creatureGroup) return;
 
-                // Find center of mass for this label's target segments
                 tempV.set(0,0,0);
                 let count = 0;
                 
+                // Average position of all segments in this group
                 item.limbs.forEach(limbIdx => {
-                    const targetName = `limb_${limbIdx}_joint_${item.segment}`;
-                    // We need to find the visual mesh inside the joint wrapper to get accurate center
-                    // Traverse is cheap enough for this scene size
-                    creatureGroup.traverse(c => {
-                        if (c.name === targetName) {
-                            // Find the visual mesh child
-                            const visual = c.children.find(child => child.name === "visual");
+                    const jointName = `limb_${limbIdx}_joint_${item.jointIndex}`;
+                    // We need to find the specific joint Group, then get the "visual" child's world position
+                    creatureGroup.traverse(obj => {
+                        if (obj.name === jointName) {
+                            const visual = obj.children.find(c => c.name === "visual");
                             if (visual) {
                                 const worldPos = new THREE.Vector3();
                                 visual.getWorldPosition(worldPos);
@@ -364,15 +361,12 @@ const App = () => {
 
                 if (count > 0) {
                     tempV.divideScalar(count);
-                    
-                    // Simple occlusion check (dot product of camera direction vs vector to object)
-                    // Or simply checking if Z in normalized device coordinates is reasonable
                     const projV = tempV.clone().project(cameraRef.current!);
 
                     const x = (projV.x * .5 + .5) * window.innerWidth;
                     const y = (projV.y * -.5 + .5) * window.innerHeight;
 
-                    // Fade out if behind camera or too far
+                    // Fade out if behind camera or too far off screen
                     if (projV.z > 1 || Math.abs(projV.x) > 1.2 || Math.abs(projV.y) > 1.2) {
                          labelDiv.style.opacity = '0';
                     } else {
@@ -640,13 +634,12 @@ const App = () => {
         
         const prompt = `
           Analyze this sketch of a Double Diamond process visualization.
-          The creature has 8 limbs.
-          Group 1 (Top Limbs 0-3): Represents the first Diamond.
-             - Inner thigh segments: "define"
-             - Outer segments: "discover"
-          Group 2 (Bottom Limbs 4-7): Represents the second Diamond.
-             - Inner thigh segments: "develop"
-             - Outer segments: "deploy"
+          The creature has 8 limbs grouped into 4 pairs representing the process phases:
+          
+          1. DISCOVER: Top-most Outer Segments (Limbs 0-3, Joint 2).
+          2. DEFINE: Top-most Inner Segments (Limbs 0-3, Joint 1).
+          3. DEVELOP: Bottom-most Inner Segments (Limbs 4-7, Joint 1).
+          4. DEPLOY: Bottom-most Outer Segments (Limbs 4-7, Joint 2).
 
           Estimate the 3D local rotations (x, y, z in radians) for all 16 joints (2 per limb) to match the pose in the sketch.
           Ensure the output is a valid JSON object matching the schema.
@@ -783,14 +776,14 @@ const App = () => {
       />
       
       {/* 3D Labels Layer */}
-      {!isCanvasMode && LABELS.map((item, i) => (
+      {!isCanvasMode && PROCESS_LABELS.map((item, i) => (
           <div 
-             key={item.name}
+             key={item.text}
              ref={el => labelRefs.current[i] = el}
              className={`absolute top-0 left-0 text-sm font-medium tracking-wide pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`}
              style={{ opacity: 0 }} // Controlled by animation loop
           >
-              {item.name}
+              {item.text}
           </div>
       ))}
 
@@ -810,4 +803,78 @@ const App = () => {
               />
               
               {/* Canvas Controls */}
-              <div className="
+              <div className="absolute top-safe right-4 mt-12 flex flex-col gap-4">
+                  <button onClick={() => setIsCanvasMode(false)} className="bg-black/10 hover:bg-black/20 p-3 rounded-full text-black">
+                      <X size={24} />
+                  </button>
+                  <button onClick={clearCanvas} className="bg-black/10 hover:bg-black/20 p-3 rounded-full text-black">
+                      <Trash2 size={24} />
+                  </button>
+              </div>
+
+              <div className="absolute bottom-12 left-0 right-0 flex justify-center items-center pointer-events-none">
+                  <button 
+                    onClick={analyzeSketchAndApply}
+                    disabled={isGenerating}
+                    className={`pointer-events-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full font-bold shadow-lg transition-all active:scale-95 ${
+                        isGenerating ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-500'
+                    } text-white`}
+                  >
+                      {isGenerating ? (
+                        <RefreshCcw className="animate-spin" size={20} />
+                      ) : (
+                        <Sparkles size={20} />
+                      )}
+                      <span>Apply</span>
+                  </button>
+              </div>
+          </div>
+      )}
+
+       {/* Minimal Control Cluster */}
+       {!isCanvasMode && (
+       <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center gap-4 z-40 pointer-events-none">
+            
+            {/* Top Row: Actions */}
+            <div className={`pointer-events-auto ${pillContainerClass}`}>
+                  <button onClick={copyPose} className={secondaryBtnClass}>
+                      {copied ? <Check size={16} className="text-green-500"/> : <Copy size={16} />}
+                  </button>
+                  <button onClick={generateRandomPose} className={secondaryBtnClass}>
+                      <Shuffle size={16} />
+                  </button>
+                  <button onClick={saveSnapshot} className={secondaryBtnClass}>
+                      <Download size={16} />
+                  </button>
+            </div>
+
+            {/* Bottom Row: Main Modes */}
+            <div className="flex items-center gap-4 pointer-events-auto">
+                 <button onClick={() => setOrbitEnabled(!orbitEnabled)} className={iconBtnClass(orbitEnabled)}>
+                    <Eye size={20} strokeWidth={2} />
+                 </button>
+                 
+                 <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}>
+                    <Hand size={20} strokeWidth={2} />
+                 </button>
+
+                 <div className="w-px h-6 bg-current opacity-20 mx-1"></div>
+
+                 <button onClick={() => setIsCanvasMode(true)} className={iconBtnClass(false)}>
+                    <Pencil size={20} strokeWidth={2} />
+                 </button>
+            </div>
+
+            {/* Reset */}
+            <button onClick={resetPose} className={`pointer-events-auto flex items-center justify-center w-8 h-8 rounded-full opacity-50 hover:opacity-100 transition-opacity ${isDark ? 'bg-white/10 text-white' : 'bg-black/10 text-black'}`}>
+                <RefreshCcw size={14} />
+            </button>
+
+       </div>
+       )}
+    </div>
+  );
+};
+
+const root = createRoot(document.getElementById("root")!);
+root.render(<App />);
