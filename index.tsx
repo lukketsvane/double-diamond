@@ -296,13 +296,15 @@ const App = () => {
         seg1Wrapper.add(seg1Hitbox); 
         pivotGroup.add(seg1Wrapper);
 
-        // Joint Mesh (Knee/Elbow)
+        // Joint Mesh (Knee/Elbow) - VISUAL HIDDEN but physically there for structure
         const joint = new THREE.Mesh(new THREE.SphereGeometry(thickness * 2.5, 12, 12), jointMaterialRef.current);
         joint.position.y = seg1Length / 2;
+        joint.visible = false; // Hide visual joint as requested
         seg1.add(joint);
         
         // Add a hitbox specifically for grabbing the Knee/Elbow to point the limb
-        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), invisibleMaterialRef.current);
+        // Increased size to 0.7 for easier grabbing
+        const kneeHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 8), invisibleMaterialRef.current);
         kneeHitbox.position.y = seg1Length / 2;
         kneeHitbox.userData = { isPart: true, isHitbox: true, type: 'knee', limbIndex: index };
         seg1.add(kneeHitbox);
@@ -316,7 +318,8 @@ const App = () => {
         seg2.name = "visual";
 
         // Tip Hitbox
-        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), invisibleMaterialRef.current);
+        // Increased size to 0.7 for easier grabbing
+        const tipHitbox = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 8), invisibleMaterialRef.current);
         tipHitbox.position.y = seg2Length; // At the very end
         tipHitbox.userData = { isPart: true, isHitbox: true, type: 'tip', limbIndex: index };
         tipHitbox.name = "hitbox_tip";
@@ -427,7 +430,7 @@ const App = () => {
 
   const snapToGrid = () => {
     if (!creatureRef.current) return;
-    const STEP = Math.PI / 12; 
+    const STEP = Math.PI / 12; // 15 degrees
     creatureRef.current.traverse((obj) => {
         if (obj.userData.isJoint) {
             const { x, y, z } = obj.rotation;
@@ -844,8 +847,12 @@ const App = () => {
 
   const isDark = theme === 'dark';
   const bgClass = isDark ? 'bg-black text-white' : 'bg-[#F2F2F7] text-black';
-  const iconBtnClass = (active: boolean) => `flex items-center justify-center w-12 h-12 rounded-full transition-all active:scale-95 ${active ? (isDark ? 'bg-white text-black' : 'bg-black text-white') : (isDark ? 'bg-neutral-800 text-neutral-400' : 'bg-white text-neutral-400')}`;
-  const secondaryBtnClass = `flex items-center justify-center w-10 h-10 rounded-full transition-all active:scale-90 ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`;
+  
+  // Scaled down UI to approx 75%
+  // w-12 -> w-9 (3rem -> 2.25rem)
+  // w-10 -> w-8 (2.5rem -> 2rem)
+  const iconBtnClass = (active: boolean) => `flex items-center justify-center w-9 h-9 rounded-full transition-all active:scale-95 ${active ? (isDark ? 'bg-white text-black' : 'bg-black text-white') : (isDark ? 'bg-neutral-800 text-neutral-400' : 'bg-white text-neutral-400')}`;
+  const secondaryBtnClass = `flex items-center justify-center w-8 h-8 rounded-full transition-all active:scale-90 ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`;
   const pillContainerClass = `flex items-center gap-1 p-1 rounded-full border backdrop-blur-md ${isDark ? 'bg-neutral-900/80 border-white/5' : 'bg-white/80 border-black/5'}`;
 
   return (
@@ -860,7 +867,7 @@ const App = () => {
       />
       
       {!isCanvasMode && INDIVIDUAL_LABELS.map((item, i) => (
-          <div key={`${item.limbIndex}-${item.jointIndex}`} ref={el => labelRefs.current[i] = el} className={`absolute top-0 left-0 text-3xl font-hand leading-none pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`} style={{ opacity: 0 }}>
+          <div key={`${item.limbIndex}-${item.jointIndex}`} ref={el => labelRefs.current[i] = el} className={`absolute top-0 left-0 text-2xl font-hand leading-none pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`} style={{ opacity: 0 }}>
               {item.text}
           </div>
       ))}
@@ -884,18 +891,18 @@ const App = () => {
        {!isCanvasMode && (
        <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center gap-4 z-40 pointer-events-none">
             <div className={`pointer-events-auto ${pillContainerClass}`}>
-                  <button onClick={copyPose} className={secondaryBtnClass}>{copied ? <Check size={16} className="text-green-500"/> : <Copy size={16} />}</button>
-                  <button onClick={generateRandomPose} className={secondaryBtnClass}><Shuffle size={16} /></button>
-                  <button onClick={saveSnapshot} className={secondaryBtnClass}><Download size={16} /></button>
+                  <button onClick={copyPose} className={secondaryBtnClass}>{copied ? <Check size={14} className="text-green-500"/> : <Copy size={14} />}</button>
+                  <button onClick={generateRandomPose} className={secondaryBtnClass}><Shuffle size={14} /></button>
+                  <button onClick={saveSnapshot} className={secondaryBtnClass}><Download size={14} /></button>
             </div>
             <div className="flex items-center gap-4 pointer-events-auto">
-                 <button onClick={() => setOrbitEnabled(!orbitEnabled)} className={iconBtnClass(orbitEnabled)}><Eye size={20} strokeWidth={2} /></button>
-                 <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}><Hand size={20} strokeWidth={2} /></button>
-                 <button onClick={snapToGrid} className={iconBtnClass(false)}><Grid3X3 size={20} strokeWidth={2} /></button>
+                 <button onClick={() => setOrbitEnabled(!orbitEnabled)} className={iconBtnClass(orbitEnabled)}><Eye size={18} strokeWidth={2} /></button>
+                 <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}><Hand size={18} strokeWidth={2} /></button>
+                 <button onClick={snapToGrid} className={iconBtnClass(false)}><Grid3X3 size={18} strokeWidth={2} /></button>
                  <div className="w-px h-6 bg-current opacity-20 mx-1"></div>
-                 <button onClick={() => { setIsCanvasMode(true); setStrokeCount(0); }} className={iconBtnClass(false)}><Pencil size={20} strokeWidth={2} /></button>
+                 <button onClick={() => { setIsCanvasMode(true); setStrokeCount(0); }} className={iconBtnClass(false)}><Pencil size={18} strokeWidth={2} /></button>
             </div>
-            <button onClick={resetPose} className={`pointer-events-auto flex items-center justify-center w-8 h-8 rounded-full opacity-50 hover:opacity-100 transition-opacity ${isDark ? 'bg-white/10 text-white' : 'bg-black/10 text-black'}`}><RefreshCcw size={14} /></button>
+            <button onClick={resetPose} className={`pointer-events-auto flex items-center justify-center w-6 h-6 rounded-full opacity-50 hover:opacity-100 transition-opacity ${isDark ? 'bg-white/10 text-white' : 'bg-black/10 text-black'}`}><RefreshCcw size={12} /></button>
        </div>
        )}
     </div>
