@@ -202,8 +202,19 @@ const App = () => {
   };
 
   useEffect(() => {
+    const isDark = theme === 'dark';
+    
+    // Update materials
+    limbMaterialRef.current.color.setHex(isDark ? 0xF2F2F7 : 0x111111);
+    jointMaterialRef.current.color.setHex(isDark ? 0x2c2c2e : 0x444444);
+    
+    // Initialize Highlight Material (Blue/Visible)
+    highlightMaterialRef.current.color.setHex(0x007AFF);
+    highlightMaterialRef.current.emissive.setHex(0x001A33);
+
+    // Update Scene Background
     if (sceneRef.current) {
-        const bg = theme === 'dark' ? 0x000000 : 0xF2F2F7;
+        const bg = isDark ? 0x000000 : 0xF2F2F7;
         sceneRef.current.background = new THREE.Color(bg);
         if (sceneRef.current.fog) {
             (sceneRef.current.fog as THREE.FogExp2).color.setHex(bg);
@@ -266,6 +277,11 @@ const App = () => {
     highlightMaterialRef.current.metalness = 0.5;
     jointMaterialRef.current.roughness = 0.1;
     jointMaterialRef.current.metalness = 0.9;
+    
+    // Initial color set based on current theme state
+    const isDark = theme === 'dark';
+    limbMaterialRef.current.color.setHex(isDark ? 0xF2F2F7 : 0x111111);
+    jointMaterialRef.current.color.setHex(isDark ? 0x2c2c2e : 0x444444);
 
     const angles = [0, Math.PI/2, Math.PI, 3*Math.PI/2];
     
@@ -370,12 +386,17 @@ const App = () => {
 
   const updateLabels = (creatureGroup: THREE.Group) => {
     if (isCanvasMode) return;
-    const tempV = new THREE.Vector3();
+    
+    // First pass: collect potential labels
+    const potentials: { id: number; x: number; y: number; z: number; el: HTMLDivElement }[] = [];
     
     INDIVIDUAL_LABELS.forEach((item, index) => {
         const labelDiv = labelRefs.current[index];
         if (!labelDiv) return;
-        if (!showLabels) { labelDiv.style.opacity = '0'; return; }
+        
+        // Default to hidden
+        labelDiv.style.opacity = '0';
+        if (!showLabels) return;
 
         const jointName = `limb_${item.limbIndex}_joint_${item.jointIndex}`;
         let targetMesh: THREE.Object3D | null = null;
@@ -387,19 +408,41 @@ const App = () => {
         });
 
         if (targetMesh) {
+            const tempV = new THREE.Vector3();
             (targetMesh as THREE.Mesh).getWorldPosition(tempV);
             const projV = tempV.clone().project(cameraRef.current!);
-            const x = (projV.x * .5 + .5) * window.innerWidth + 30;
-            const y = (projV.y * -.5 + .5) * window.innerHeight;
-
-            if (Math.abs(projV.x) > 1.1 || Math.abs(projV.y) > 1.1) {
-                    labelDiv.style.opacity = '0';
-            } else {
-                labelDiv.style.opacity = '1';
-                labelDiv.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+            
+            // Frustum check
+            if (Math.abs(projV.x) <= 0.95 && Math.abs(projV.y) <= 0.95) {
+                const x = (projV.x * .5 + .5) * window.innerWidth;
+                const y = (projV.y * -.5 + .5) * window.innerHeight;
+                potentials.push({ id: index, x, y, z: projV.z, el: labelDiv });
             }
         }
     });
+    
+    // Second pass: Overlap detection
+    const visible: typeof potentials = [];
+    const MIN_DIST_SQ = 40 * 40; // 40px threshold
+
+    // Simple greedy approach: render if not overlapping with already rendered
+    for (const p of potentials) {
+        let overlap = false;
+        for (const v of visible) {
+            const dx = p.x - v.x;
+            const dy = p.y - v.y;
+            if (dx*dx + dy*dy < MIN_DIST_SQ) {
+                overlap = true;
+                break;
+            }
+        }
+        if (!overlap) {
+            visible.push(p);
+            p.el.style.opacity = '1';
+            // Center the label (translate -50%) and place it
+            p.el.style.transform = `translate(-50%, -50%) translate(${p.x}px, ${p.y}px)`;
+        }
+    }
   };
 
   const applyPoseToRef = (pose: PoseData, group: THREE.Group) => {
@@ -564,8 +607,30 @@ const App = () => {
           joint1.getWorldPosition(rootPos);
           const direction = new THREE.Vector3().subVectors(finalTarget, rootPos);
           let dist = direction.length();
-          const l1 = LIMB_SEGMENT_1_LENGTH;
+          
+          // Use current scale if possible to determine max length? 
+          // For simplicity we use standard length, or we could inspect the current positions.
+          // Since scaling is done via magic pose, assume standard for manual dragging unless we read current scale.
+          // Let's read current positions to infer length.
+          // Joint1 is at 0 local to parent.
+          const j2 = joint2 as THREE.Group;
+          // seg1 length approx = j2.position.y
+          // seg2 length approx = (j2 children visual).position.y * 2? 
+          // Actually, we can just use the standard length as the constraint for manual IK for now, 
+          // or assume the user wants to keep the Magic Pose length.
+          // Let's use the current physical length of segments.
+          const currentL1 = j2.position.y; // distance from J1 to J2
+          // To get L2, we need the tip hitbox position relative to J2.
+          const tip = j2.children.find(c => c.children.some(k => k.name==='hitbox_tip'))?.children.find(k => k.name==='hitbox_tip');
+          // Actually tip is child of seg2 visual mesh.
+          // Let's approximate L2 based on standard * scale. 
+          // Or simpler: just use dist.
+          
+          // Revert to standard lengths for IK calculation to keep it stable, 
+          // as variable limb length IK is complex if we don't track the variable length.
+          const l1 = LIMB_SEGMENT_1_LENGTH; 
           const l2 = LIMB_SEGMENT_2_LENGTH;
+          
           if (dist > l1 + l2 - 0.01) { dist = l1 + l2 - 0.01; direction.normalize().multiplyScalar(dist); }
           
           const cosKnee = (l1*l1 + l2*l2 - dist*dist) / (2*l1*l2);
@@ -669,10 +734,11 @@ const App = () => {
 
             result.limbs.forEach((l: any) => {
                 const i = l.id;
-                const j1 = creatureRef.current!.getObjectByName(`limb_${i}_joint_1`);
-                const j2 = creatureRef.current!.getObjectByName(`limb_${i}_joint_2`);
+                const j1 = creatureRef.current!.getObjectByName(`limb_${i}_joint_1`) as THREE.Group;
+                const j2 = creatureRef.current!.getObjectByName(`limb_${i}_joint_2`) as THREE.Group;
                 if (!j1 || !j2) return;
 
+                // Calculate positions in "Frustum Space" (Z=0)
                 const kneeX = (l.knee[0] - 0.5) * frustumWidth; 
                 const kneeY = -(l.knee[1] - 0.5) * frustumHeight;
                 const kneePos = new THREE.Vector3(kneeX, kneeY, 0); 
@@ -681,12 +747,47 @@ const App = () => {
                 const tipY = -(l.tip[1] - 0.5) * frustumHeight;
                 const tipPos = new THREE.Vector3(tipX, tipY, 0);
 
+                // Calculate Limb Lengths based on sketch
+                const origin = new THREE.Vector3(0,0,0); // J1 local origin (if projected to same plane)
+                // Since the sketch corresponds to the camera view, and the root is at 0,0,0 in view:
+                const d1 = origin.distanceTo(kneePos);
+                const d2 = kneePos.distanceTo(tipPos);
+                
+                // Calculate scale ratios (clamped 0.85 - 1.15)
+                const r1 = Math.min(1.15, Math.max(0.85, d1 / LIMB_SEGMENT_1_LENGTH));
+                const r2 = Math.min(1.15, Math.max(0.85, d2 / LIMB_SEGMENT_2_LENGTH));
+                
+                // Apply Scale
+                const seg1Mesh = j1.children.find(c => c.name === 'visual') as THREE.Mesh;
+                const seg2Mesh = j2.children.find(c => c.name === 'visual') as THREE.Mesh;
+                
+                if (seg1Mesh) {
+                    seg1Mesh.scale.set(1, r1, 1);
+                    seg1Mesh.position.y = (LIMB_SEGMENT_1_LENGTH * r1) / 2;
+                }
+                
+                // Move J2 to new knee position
+                j2.position.y = LIMB_SEGMENT_1_LENGTH * r1;
+                
+                if (seg2Mesh) {
+                    seg2Mesh.scale.set(1, r2, 1);
+                    seg2Mesh.position.y = (LIMB_SEGMENT_2_LENGTH * r2) / 2;
+                    // Move tip hitbox
+                    const tipHitbox = seg2Mesh.children.find(c => c.name === 'hitbox_tip');
+                    if (tipHitbox) tipHitbox.position.y = LIMB_SEGMENT_2_LENGTH; // Relative to scaled mesh, so position 2.0 * r2
+                    // Wait, if mesh is scaled by r2, child position y=2.0 becomes 2.0*r2 in world. 
+                    // So we keep local y constant.
+                }
+
+                // Apply Rotations (IK)
+                // 1. Point J1 to Knee
                 const localKnee = kneePos.clone();
                 j1.parent!.worldToLocal(localKnee);
                 const dir1 = localKnee.normalize();
                 j1.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir1);
-
-                j1.updateWorldMatrix(true, false);
+                
+                // 2. Point J2 to Tip
+                j1.updateWorldMatrix(true, false); // Update J1 to get correct world pos for J2
                 const kneeWorldActual = new THREE.Vector3();
                 j2.getWorldPosition(kneeWorldActual);
                 
