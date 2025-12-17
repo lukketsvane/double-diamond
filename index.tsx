@@ -19,22 +19,86 @@ type ThemeMode = 'light' | 'dark';
 
 // --- Constants ---
 const INITIAL_POSE: PoseData = {
-  "limb_0_joint_1": { "x": 0.5, "y": 0, "z": 0 },
-  "limb_0_joint_2": { "x": -1.704, "y": -0.193, "z": -1.094 },
-  "limb_1_joint_1": { "x": -1.446, "y": -0.079, "z": 2.31 },
-  "limb_1_joint_2": { "x": -0.87, "y": 0.847, "z": -0.814 },
-  "limb_2_joint_1": { "x": 2.842, "y": 1.433, "z": 0.789 },
-  "limb_2_joint_2": { "x": -1.689, "y": -0.11, "z": -0.437 },
-  "limb_3_joint_1": { "x": 0.5, "y": -0.03, "z": -0.018 },
-  "limb_3_joint_2": { "x": 3.031, "y": -0.631, "z": -1.517 },
-  "limb_4_joint_1": { "x": -0.708, "y": -0.07, "z": -0.061 },
-  "limb_4_joint_2": { "x": 2.237, "y": -0.29, "z": 1.018 },
-  "limb_5_joint_1": { "x": 1.526, "y": -0.005, "z": -1.917 },
-  "limb_5_joint_2": { "x": 1.077, "y": 0.446, "z": 0.624 },
-  "limb_6_joint_1": { "x": 0.671, "y": 1.447, "z": 1.79 },
-  "limb_6_joint_2": { "x": 1.694, "y": 0.004, "z": 0.407 },
-  "limb_7_joint_1": { "x": -0.5, "y": 0, "z": 0 },
-  "limb_7_joint_2": { "x": 1.27, "y": 0.294, "z": 1.146 }
+  "limb_0_joint_1": {
+    "x": -1.251,
+    "y": -0.204,
+    "z": -0.921
+  },
+  "limb_0_joint_2": {
+    "x": 1.357,
+    "y": 0.146,
+    "z": -0.555
+  },
+  "limb_1_joint_1": {
+    "x": -1.251,
+    "y": -0.204,
+    "z": -0.921
+  },
+  "limb_1_joint_2": {
+    "x": 1.217,
+    "y": 0.065,
+    "z": -0.537
+  },
+  "limb_2_joint_1": {
+    "x": -1.416,
+    "y": -0.435,
+    "z": -0.573
+  },
+  "limb_2_joint_2": {
+    "x": 0.818,
+    "y": -0.307,
+    "z": -1.242
+  },
+  "limb_3_joint_1": {
+    "x": -1.378,
+    "y": -0.293,
+    "z": -0.785
+  },
+  "limb_3_joint_2": {
+    "x": 1.524,
+    "y": 0.121,
+    "z": -0.978
+  },
+  "limb_4_joint_1": {
+    "x": 1.312,
+    "y": -0.273,
+    "z": -1.036
+  },
+  "limb_4_joint_2": {
+    "x": 0.662,
+    "y": -0.659,
+    "z": -0.984
+  },
+  "limb_5_joint_1": {
+    "x": 1.299,
+    "y": -0.281,
+    "z": -1.034
+  },
+  "limb_5_joint_2": {
+    "x": -0.309,
+    "y": -0.72,
+    "z": -1.877
+  },
+  "limb_6_joint_1": {
+    "x": 1.314,
+    "y": -0.282,
+    "z": -1.048
+  },
+  "limb_6_joint_2": {
+    "x": 0.884,
+    "y": -0.305,
+    "z": -1.031
+  },
+  "limb_7_joint_1": {
+    "x": 1.251,
+    "y": -0.204,
+    "z": -0.921
+  },
+  "limb_7_joint_2": {
+    "x": 2.418,
+    "y": 0.4,
+    "z": -1.043
+  }
 };
 
 const COLORS = {
@@ -597,17 +661,6 @@ const App = () => {
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
       />
-
-       {/* Top Label (Optional, keeping ID display for context but minimal) */}
-       {selectedId && (
-        <div className="absolute top-0 left-0 right-0 p-4 pt-[max(1.5rem,env(safe-area-inset-top))] flex justify-center pointer-events-none transition-opacity duration-300 z-40">
-            <div className={`px-3 py-1 rounded-full backdrop-blur-md text-[10px] font-mono tracking-widest opacity-50 ${
-                isDark ? 'bg-white/5 text-white' : 'bg-black/5 text-black'
-            }`}>
-                {selectedId}
-            </div>
-        </div>
-       )}
 
        {/* Minimal Control Cluster */}
        <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center gap-4 z-50 pointer-events-none">
