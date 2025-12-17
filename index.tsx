@@ -18,18 +18,23 @@ type PoseData = Record<string, {x: number, y: number, z: number}>;
 type ThemeMode = 'light' | 'dark';
 
 // --- Constants ---
-// "Closed Bud" Pose: Limbs curl back in to touch tips at the central axis
 const INITIAL_POSE: PoseData = {
-  // Upper Set (0-3) - Curling Inwards/Down
-  "limb_0_joint_1": { "x": 0.5, "y": 0, "z": 0 }, "limb_0_joint_2": { "x": -2.4, "y": 0, "z": 0 },
-  "limb_1_joint_1": { "x": 0.5, "y": 0, "z": 0 }, "limb_1_joint_2": { "x": -2.4, "y": 0, "z": 0 },
-  "limb_2_joint_1": { "x": 0.5, "y": 0, "z": 0 }, "limb_2_joint_2": { "x": -2.4, "y": 0, "z": 0 },
-  "limb_3_joint_1": { "x": 0.5, "y": 0, "z": 0 }, "limb_3_joint_2": { "x": -2.4, "y": 0, "z": 0 },
-  // Lower Set (4-7) - Mirrored Curling Inwards/Up
-  "limb_4_joint_1": { "x": -0.5, "y": 0, "z": 0 }, "limb_4_joint_2": { "x": 2.4, "y": 0, "z": 0 },
-  "limb_5_joint_1": { "x": -0.5, "y": 0, "z": 0 }, "limb_5_joint_2": { "x": 2.4, "y": 0, "z": 0 },
-  "limb_6_joint_1": { "x": -0.5, "y": 0, "z": 0 }, "limb_6_joint_2": { "x": 2.4, "y": 0, "z": 0 },
-  "limb_7_joint_1": { "x": -0.5, "y": 0, "z": 0 }, "limb_7_joint_2": { "x": 2.4, "y": 0, "z": 0 }
+  "limb_0_joint_1": { "x": 0.5, "y": 0, "z": 0 },
+  "limb_0_joint_2": { "x": -1.704, "y": -0.193, "z": -1.094 },
+  "limb_1_joint_1": { "x": -1.446, "y": -0.079, "z": 2.31 },
+  "limb_1_joint_2": { "x": -0.87, "y": 0.847, "z": -0.814 },
+  "limb_2_joint_1": { "x": 2.842, "y": 1.433, "z": 0.789 },
+  "limb_2_joint_2": { "x": -1.689, "y": -0.11, "z": -0.437 },
+  "limb_3_joint_1": { "x": 0.5, "y": -0.03, "z": -0.018 },
+  "limb_3_joint_2": { "x": 3.031, "y": -0.631, "z": -1.517 },
+  "limb_4_joint_1": { "x": -0.708, "y": -0.07, "z": -0.061 },
+  "limb_4_joint_2": { "x": 2.237, "y": -0.29, "z": 1.018 },
+  "limb_5_joint_1": { "x": 1.526, "y": -0.005, "z": -1.917 },
+  "limb_5_joint_2": { "x": 1.077, "y": 0.446, "z": 0.624 },
+  "limb_6_joint_1": { "x": 0.671, "y": 1.447, "z": 1.79 },
+  "limb_6_joint_2": { "x": 1.694, "y": 0.004, "z": 0.407 },
+  "limb_7_joint_1": { "x": -0.5, "y": 0, "z": 0 },
+  "limb_7_joint_2": { "x": 1.27, "y": 0.294, "z": 1.146 }
 };
 
 const COLORS = {
@@ -56,6 +61,27 @@ const COLORS = {
 };
 
 const CACHE_KEY = "mento_pose_cache";
+
+// --- Helper: Wobbly Geometry ---
+const createWobblyGeometry = (baseGeo: THREE.BufferGeometry, magnitude: number = 0.015) => {
+  const geo = baseGeo.clone();
+  const posAttribute = geo.attributes.position;
+  const count = posAttribute.count;
+  
+  for (let i = 0; i < count; i++) {
+    // Add random noise to vertices
+    const dx = (Math.random() - 0.5) * magnitude;
+    const dy = (Math.random() - 0.5) * magnitude;
+    const dz = (Math.random() - 0.5) * magnitude;
+    
+    posAttribute.setX(i, posAttribute.getX(i) + dx);
+    posAttribute.setY(i, posAttribute.getY(i) + dy);
+    posAttribute.setZ(i, posAttribute.getZ(i) + dz);
+  }
+  
+  geo.computeVertexNormals();
+  return geo;
+};
 
 // --- Hook: System Theme ---
 const useSystemTheme = (): ThemeMode => {
@@ -112,7 +138,6 @@ const App = () => {
   const limbMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const highlightMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const jointMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
-  const edgeMaterialRef = useRef<THREE.LineBasicMaterial>(new THREE.LineBasicMaterial());
   
   const invisibleMaterialRef = useRef<THREE.MeshBasicMaterial>(new THREE.MeshBasicMaterial({ 
       transparent: true, 
@@ -199,8 +224,10 @@ const App = () => {
 
         const seg1Length = 1.5;
         
-        // 1. Visual Mesh
-        const seg1Geo = new THREE.BoxGeometry(0.04, seg1Length, 0.04);
+        // 1. Visual Mesh (Wobbly)
+        // Use more segments to allow for wobble
+        const seg1BaseGeo = new THREE.BoxGeometry(0.04, seg1Length, 0.04, 3, 12, 3);
+        const seg1Geo = createWobblyGeometry(seg1BaseGeo, 0.02);
         const seg1 = new THREE.Mesh(seg1Geo, limbMaterialRef.current);
         seg1.position.y = seg1Length / 2;
         seg1.name = "visual";
@@ -216,21 +243,20 @@ const App = () => {
         seg1Wrapper.userData = { isJoint: true, id: `limb_${index}_joint_1` };
         
         seg1Wrapper.add(seg1);
-        seg1Wrapper.add(seg1Hitbox); // Add hitbox as sibling to visual
+        seg1Wrapper.add(seg1Hitbox); 
         pivotGroup.add(seg1Wrapper);
         
-        const e1 = new THREE.EdgesGeometry(seg1Geo);
-        const l1 = new THREE.LineSegments(e1, edgeMaterialRef.current);
-        seg1.add(l1);
+        // Removed EdgeGeometry (Lines)
 
-        const joint = new THREE.Mesh(new THREE.SphereGeometry(0.025, 16, 16), jointMaterialRef.current);
+        const joint = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 8), jointMaterialRef.current);
         joint.position.y = seg1Length / 2;
         seg1.add(joint);
 
         const seg2Length = 2.0;
         
-        // 3. Segment 2 Visual
-        const seg2Geo = new THREE.ConeGeometry(0.02, seg2Length, 4);
+        // 3. Segment 2 Visual (Wobbly)
+        const seg2BaseGeo = new THREE.ConeGeometry(0.02, seg2Length, 6, 12);
+        const seg2Geo = createWobblyGeometry(seg2BaseGeo, 0.02);
         const seg2 = new THREE.Mesh(seg2Geo, limbMaterialRef.current);
         seg2.position.y = seg2Length / 2;
         seg2.name = "visual";
@@ -249,10 +275,8 @@ const App = () => {
         seg2Wrapper.add(seg2);
         seg2Wrapper.add(seg2Hitbox);
         seg1Wrapper.add(seg2Wrapper);
-
-        const e2 = new THREE.EdgesGeometry(seg2Geo);
-        const l2 = new THREE.LineSegments(e2, edgeMaterialRef.current);
-        seg2.add(l2);
+        
+        // Removed EdgeGeometry (Lines)
     };
 
     angles.forEach((angle, i) => createLimb(true, angle, i));
@@ -296,74 +320,47 @@ const App = () => {
       });
   };
 
-  // GENERATOR ALGORITHMS
+  // GENERATOR ALGORITHMS (Simplified for brevity as structure logic is unchanged, just using new wobble geo)
   const generateRandomPose = () => {
+     // ... (Existing logic kept, just calling applyPoseToRef)
      const strategies = [
-         // Strategy 1: STAR SYMMETRY (All limbs identical geometry, lower mirrored)
          () => {
              const j1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
              const j2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
              const pose: PoseData = {};
-             
-             // Top
-             for(let i=0; i<4; i++) {
-                 pose[`limb_${i}_joint_1`] = j1;
-                 pose[`limb_${i}_joint_2`] = j2;
-             }
-             // Bottom (Mirrored X and Z to maintain radial symmetry relative to their base)
-             // Or inverted X to close/open oppositely
-             for(let i=4; i<8; i++) {
-                 pose[`limb_${i}_joint_1`] = { x: -j1.x, y: j1.y, z: j1.z };
-                 pose[`limb_${i}_joint_2`] = { x: -j2.x, y: j2.y, z: j2.z };
-             }
+             for(let i=0; i<4; i++) { pose[`limb_${i}_joint_1`] = j1; pose[`limb_${i}_joint_2`] = j2; }
+             for(let i=4; i<8; i++) { pose[`limb_${i}_joint_1`] = { x: -j1.x, y: j1.y, z: j1.z }; pose[`limb_${i}_joint_2`] = { x: -j2.x, y: j2.y, z: j2.z }; }
              return pose;
          },
-         // Strategy 2: DUAL RING (Top ring is one shape, Bottom ring is another)
          () => {
              const t1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
              const t2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
-             
              const b1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
              const b2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
-             
              const pose: PoseData = {};
-             for(let i=0; i<4; i++) {
-                 pose[`limb_${i}_joint_1`] = t1;
-                 pose[`limb_${i}_joint_2`] = t2;
-             }
-             for(let i=4; i<8; i++) {
-                 pose[`limb_${i}_joint_1`] = b1;
-                 pose[`limb_${i}_joint_2`] = b2;
-             }
+             for(let i=0; i<4; i++) { pose[`limb_${i}_joint_1`] = t1; pose[`limb_${i}_joint_2`] = t2; }
+             for(let i=4; i<8; i++) { pose[`limb_${i}_joint_1`] = b1; pose[`limb_${i}_joint_2`] = b2; }
              return pose;
          },
-         // Strategy 3: GEAR (Alternating A-B-A-B patterns)
          () => {
              const a1 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
              const a2 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
-             
              const b1 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
              const b2 = { x: (Math.random()-0.5)*3, y: 0, z: (Math.random()-0.5)*1 };
-
              const pose: PoseData = {};
              for(let i=0; i<8; i++) {
                  const isEven = i % 2 === 0;
-                 // Flip bottom ones for symmetry
                  const flip = i >= 4 ? -1 : 1;
-                 
                  const p1 = isEven ? a1 : b1;
                  const p2 = isEven ? a2 : b2;
-                 
                  pose[`limb_${i}_joint_1`] = { x: p1.x * flip, y: p1.y, z: p1.z };
                  pose[`limb_${i}_joint_2`] = { x: p2.x * flip, y: p2.y, z: p2.z };
              }
              return pose;
          }
      ];
-
      const strategy = strategies[Math.floor(Math.random() * strategies.length)];
-     const newPose = strategy();
-     if (creatureRef.current) applyPoseToRef(newPose, creatureRef.current);
+     if (creatureRef.current) applyPoseToRef(strategy(), creatureRef.current);
   };
 
   const saveSnapshot = () => {
@@ -383,26 +380,18 @@ const App = () => {
     mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current!);
     
-    // Check intersection
     const intersects = raycasterRef.current.intersectObjects(creatureRef.current!.children, true);
-    // Find closest hit that is a part (hitbox or visual)
     const hit = intersects.find(i => i.object.userData.isPart);
 
     previousPointerRef.current = { x: e.clientX, y: e.clientY };
 
-    // --- LOGIC ---
     if (hit) {
-        // We hit a limb
         if (grabEnabled) {
-             // Drag mode active
              isDraggingRef.current = true;
              if (controlsRef.current) controlsRef.current.enabled = false;
-             
-             // Select logic
              selectJoint(hit.object as THREE.Mesh);
              
-             // Prepare Lever Drag
-             const wrapper = hit.object.parent; // Joint Wrapper
+             const wrapper = hit.object.parent; 
              if (wrapper) {
                const jointWorldPos = new THREE.Vector3();
                wrapper.getWorldPosition(jointWorldPos);
@@ -421,24 +410,16 @@ const App = () => {
                }
             }
         } else {
-            // Grab disabled: Just select, maybe orbit if enabled
             selectJoint(hit.object as THREE.Mesh);
-            // If orbit is enabled, orbit controls work by default (we don't disable them)
         }
     } else {
-        // Hit Background
         if (!orbitEnabled && grabEnabled) {
-            // Remote Control Mode: Dragging BG rotates selected limb
-            // if something is selected
             if (selectedId) {
                 isDraggingRef.current = true;
                 if (controlsRef.current) controlsRef.current.enabled = false;
             }
-        } else if (orbitEnabled) {
-             // Standard orbit (OrbitControls handles this)
         }
     }
-
     e.stopPropagation();
   };
 
@@ -449,11 +430,9 @@ const App = () => {
       const wrapper = selectedMeshRef.current.parent;
       if (!wrapper || !wrapper.userData.isJoint) return;
 
-      // Check if we initialized Lever Drag (clicked a limb)
-      const isLeverDrag = dragStartVectorRef.current.lengthSq() > 0.5; // It's normalized, so length 1
+      const isLeverDrag = dragStartVectorRef.current.lengthSq() > 0.5;
 
       if (isLeverDrag) {
-          // LEVER DRAG
           const rect = rendererRef.current!.domElement.getBoundingClientRect();
           const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
           const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -465,23 +444,19 @@ const App = () => {
           if (planeIntersect) {
               const currentVector = new THREE.Vector3().subVectors(planeIntersect, jointWorldPosRef.current).normalize();
               const startVector = dragStartVectorRef.current;
-              
               const deltaQ = new THREE.Quaternion().setFromUnitVectors(startVector, currentVector);
               
               const currentWorldQ = new THREE.Quaternion();
               wrapper.getWorldQuaternion(currentWorldQ);
               
               const newWorldQ = deltaQ.multiply(currentWorldQ);
-              
               const parent = wrapper.parent;
               const parentWorldQ = new THREE.Quaternion();
               if (parent) parent.getWorldQuaternion(parentWorldQ);
               wrapper.quaternion.copy(parentWorldQ.invert().multiply(newWorldQ));
-              
               dragStartVectorRef.current.copy(currentVector);
           }
       } else {
-          // REMOTE TRACKBALL DRAG (Background click with Orbit OFF)
           const deltaX = e.clientX - previousPointerRef.current.x;
           const deltaY = e.clientY - previousPointerRef.current.y;
           previousPointerRef.current = { x: e.clientX, y: e.clientY };
@@ -498,7 +473,6 @@ const App = () => {
           const currentWorldQ = new THREE.Quaternion();
           wrapper.getWorldQuaternion(currentWorldQ);
           const newWorldQ = deltaQ.multiply(currentWorldQ);
-          
           const parent = wrapper.parent;
           const parentWorldQ = new THREE.Quaternion();
           if (parent) parent.getWorldQuaternion(parentWorldQ);
@@ -508,15 +482,12 @@ const App = () => {
 
   const handlePointerUp = () => {
       isDraggingRef.current = false;
-      dragStartVectorRef.current.set(0,0,0); // Reset drag type
-      
-      // Update orbit control state based on toggle
+      dragStartVectorRef.current.set(0,0,0);
       if (controlsRef.current) {
           controlsRef.current.enabled = orbitEnabled;
       }
   };
   
-  // Ensure controls are updated when toggles change
   useEffect(() => {
       if (controlsRef.current) {
           controlsRef.current.enabled = orbitEnabled;
@@ -524,7 +495,6 @@ const App = () => {
   }, [orbitEnabled]);
 
   const selectJoint = (mesh: THREE.Mesh) => {
-      // If we clicked a hitbox, find the visual sibling
       let visualMesh = mesh;
       if (mesh.userData.isHitbox) {
           const parent = mesh.parent;
@@ -554,7 +524,6 @@ const App = () => {
     highlightMaterialRef.current.color.setHex(palette.limb);
     highlightMaterialRef.current.emissive.setHex(theme === 'dark' ? 0xff3b30 : 0xff453a); 
     jointMaterialRef.current.color.setHex(palette.joint);
-    edgeMaterialRef.current.color.setHex(palette.edge);
     if (lightsRef.current) {
       lightsRef.current.ambient.color.setHex(palette.ambient);
       lightsRef.current.directional.color.setHex(palette.directional);
@@ -600,27 +569,22 @@ const App = () => {
   const isDark = theme === 'dark';
   const bgClass = isDark ? 'bg-black text-white' : 'bg-[#F2F2F7] text-black';
   
-  // UI Styles
-  const primaryBtnClass = (active: boolean) => 
-    `flex items-center justify-center gap-2 px-6 py-4 rounded-2xl font-bold tracking-widest text-xs uppercase transition-all active:scale-95 shadow-lg ${
+  // UI Styles - Minimal (No text labels)
+  const iconBtnClass = (active: boolean) => 
+    `flex items-center justify-center w-12 h-12 rounded-full transition-all active:scale-95 shadow-md ${
       active 
        ? (isDark ? 'bg-white text-black' : 'bg-black text-white') 
-       : (isDark ? 'bg-neutral-900 text-neutral-400' : 'bg-white text-neutral-400')
+       : (isDark ? 'bg-neutral-800 text-neutral-400' : 'bg-white text-neutral-400')
     }`;
   
   const secondaryBtnClass = 
-    `flex items-center justify-center p-3 rounded-full transition-all active:scale-90 ${
+    `flex items-center justify-center w-10 h-10 rounded-full transition-all active:scale-90 ${
         isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'
     }`;
   
   const pillContainerClass = 
-    `flex items-center p-1 rounded-2xl shadow-sm border backdrop-blur-md ${
+    `flex items-center gap-1 p-1 rounded-full shadow-sm border backdrop-blur-md ${
         isDark ? 'bg-neutral-900/80 border-white/5' : 'bg-white/80 border-black/5'
-    }`;
-
-  const wideBtnClass = 
-    `w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold tracking-widest text-xs uppercase shadow-sm border transition-all active:scale-95 ${
-        isDark ? 'bg-neutral-900 text-white border-white/5' : 'bg-white text-black border-black/5'
     }`;
 
   return (
@@ -634,54 +598,51 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
 
-       {/* Top Label */}
-       <div className={`absolute top-0 left-0 right-0 p-4 pt-[max(1.5rem,env(safe-area-inset-top))] flex justify-center pointer-events-none transition-opacity duration-300 z-40 ${selectedId ? 'opacity-100' : 'opacity-0'}`}>
-          <div className={`px-4 py-1.5 rounded-full backdrop-blur-xl text-[10px] font-bold tracking-widest uppercase shadow-lg border ${
-             isDark ? 'bg-white/10 text-white border-white/10' : 'bg-white/70 text-black border-black/5'
-          }`}>
-             {selectedId ? selectedId.replace(/_/g, ' ') : ''}
-          </div>
-       </div>
+       {/* Top Label (Optional, keeping ID display for context but minimal) */}
+       {selectedId && (
+        <div className="absolute top-0 left-0 right-0 p-4 pt-[max(1.5rem,env(safe-area-inset-top))] flex justify-center pointer-events-none transition-opacity duration-300 z-40">
+            <div className={`px-3 py-1 rounded-full backdrop-blur-md text-[10px] font-mono tracking-widest opacity-50 ${
+                isDark ? 'bg-white/5 text-white' : 'bg-black/5 text-black'
+            }`}>
+                {selectedId}
+            </div>
+        </div>
+       )}
 
-       {/* Main Control Cluster */}
-       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col gap-3 w-72 z-50">
+       {/* Minimal Control Cluster */}
+       <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center gap-4 z-50 pointer-events-none">
             
-            {/* 1. Toggle Buttons */}
-            <div className="grid grid-cols-2 gap-3 h-16">
-                 <button onClick={() => setOrbitEnabled(!orbitEnabled)} className={primaryBtnClass(orbitEnabled)}>
-                    <Eye size={18} strokeWidth={2.5} />
-                    <span>Orbit</span>
-                 </button>
-                 <button onClick={() => setGrabEnabled(!grabEnabled)} className={primaryBtnClass(grabEnabled)}>
-                    <Hand size={18} strokeWidth={2.5} />
-                    <span>Grab</span>
-                 </button>
+            {/* Top Row: Actions */}
+            <div className={`pointer-events-auto ${pillContainerClass}`}>
+                  <button onClick={copyPose} className={secondaryBtnClass}>
+                      {copied ? <Check size={16} className="text-green-500"/> : <Copy size={16} />}
+                  </button>
+                  <button onClick={generateRandomPose} className={secondaryBtnClass}>
+                      <Shuffle size={16} />
+                  </button>
+                  <button onClick={saveSnapshot} className={secondaryBtnClass}>
+                      <Download size={16} />
+                  </button>
             </div>
 
-            {/* 2. Tools & Free Mode */}
-            <div className="grid grid-cols-[1.5fr_1fr] gap-3 h-14">
-                 <div className={`${pillContainerClass} justify-around px-2`}>
-                      <button onClick={copyPose} className={secondaryBtnClass}>
-                          {copied ? <Check size={18} className="text-green-500"/> : <Copy size={18} />}
-                      </button>
-                      <button onClick={generateRandomPose} className={secondaryBtnClass}>
-                          <Shuffle size={18} />
-                      </button>
-                      <button onClick={saveSnapshot} className={secondaryBtnClass}>
-                          <Download size={18} />
-                      </button>
-                 </div>
+            {/* Bottom Row: Main Modes */}
+            <div className="flex items-center gap-4 pointer-events-auto">
+                 <button onClick={() => setOrbitEnabled(!orbitEnabled)} className={iconBtnClass(orbitEnabled)}>
+                    <Eye size={20} strokeWidth={2} />
+                 </button>
                  
-                 <button onClick={() => { setOrbitEnabled(true); setGrabEnabled(true); }} className={`${primaryBtnClass(orbitEnabled && grabEnabled)} !px-0`}>
-                    <Grid3x3 size={18} strokeWidth={2.5} />
-                    <span>Free</span>
+                 <button onClick={() => { setOrbitEnabled(true); setGrabEnabled(true); }} className={iconBtnClass(orbitEnabled && grabEnabled)}>
+                    <Grid3x3 size={20} strokeWidth={2} />
+                 </button>
+
+                 <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}>
+                    <Hand size={20} strokeWidth={2} />
                  </button>
             </div>
 
-            {/* 3. Reset Button */}
-            <button onClick={resetPose} className={wideBtnClass}>
-                <RefreshCcw size={16} strokeWidth={2.5} />
-                <span>Reset</span>
+            {/* Reset */}
+            <button onClick={resetPose} className={`pointer-events-auto flex items-center justify-center w-8 h-8 rounded-full opacity-50 hover:opacity-100 transition-opacity ${isDark ? 'bg-white/10 text-white' : 'bg-black/10 text-black'}`}>
+                <RefreshCcw size={14} />
             </button>
 
        </div>
