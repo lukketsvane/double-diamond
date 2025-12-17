@@ -93,18 +93,13 @@ const PRESET_POSE_2: PoseData = {
 };
 
 const generateLabels = () => {
-    const labels = [];
-    const representativeLimbs = [0, 3, 4, 7]; 
-    representativeLimbs.forEach(i => {
-        if (i < 4) { 
-            labels.push({ text: "define", limbIndex: i, jointIndex: 1 });
-            labels.push({ text: "discover", limbIndex: i, jointIndex: 2 });
-        } else { 
-            labels.push({ text: "develop", limbIndex: i, jointIndex: 1 });
-            labels.push({ text: "deploy", limbIndex: i, jointIndex: 2 });
-        }
-    });
-    return labels;
+    // Top Right (Limb 0) and Bottom Left (Limb 6) based on the sparse sketch
+    return [
+        { text: "develop", limbIndex: 0, jointIndex: 1 }, // Knee
+        { text: "deploy", limbIndex: 0, jointIndex: 2 },  // Tip
+        { text: "define", limbIndex: 6, jointIndex: 1 },  // Knee
+        { text: "discover", limbIndex: 6, jointIndex: 2 } // Tip
+    ];
 };
 const INDIVIDUAL_LABELS = generateLabels();
 
@@ -398,8 +393,14 @@ const App = () => {
     // Check refs to avoid stale closures in animation loop
     if (isCanvasModeRef.current) return;
     
+    // Calculate center of screen in pixels
+    const center = new THREE.Vector3(0,0,0);
+    center.project(cameraRef.current!);
+    const cx = (center.x * .5 + .5) * window.innerWidth;
+    const cy = (center.y * -.5 + .5) * window.innerHeight;
+
     // First pass: collect potential labels
-    const potentials: { id: number; x: number; y: number; z: number; el: HTMLDivElement }[] = [];
+    const potentials: { id: number; x: number; y: number; z: number; el: HTMLDivElement; width: number; height: number }[] = [];
     
     INDIVIDUAL_LABELS.forEach((item, index) => {
         const labelDiv = labelRefs.current[index];
@@ -427,22 +428,43 @@ const App = () => {
             if (Math.abs(projV.x) <= 0.95 && Math.abs(projV.y) <= 0.95) {
                 const x = (projV.x * .5 + .5) * window.innerWidth;
                 const y = (projV.y * -.5 + .5) * window.innerHeight;
-                potentials.push({ id: index, x, y, z: projV.z, el: labelDiv });
+
+                // Offset Logic: Push away from center
+                const dx = x - cx;
+                const dy = y - cy;
+                const len = Math.sqrt(dx*dx + dy*dy) || 1;
+                const dirX = dx / len;
+                const dirY = dy / len;
+                
+                // Push out by 50px
+                const finalX = x + dirX * 50;
+                const finalY = y + dirY * 50;
+
+                potentials.push({ 
+                    id: index, 
+                    x: finalX, 
+                    y: finalY, 
+                    z: projV.z, 
+                    el: labelDiv,
+                    width: 80, 
+                    height: 30
+                });
             }
         }
     });
     
-    // Second pass: Overlap detection
+    // Second pass: Bounding Box Overlap detection
     const visible: typeof potentials = [];
-    const MIN_DIST_SQ = 40 * 40; // 40px threshold
+    
+    // Sort by Z to prioritize foreground labels if needed, or simple first-come
+    potentials.sort((a, b) => a.z - b.z);
 
-    // Simple greedy approach: render if not overlapping with already rendered
     for (const p of potentials) {
         let overlap = false;
         for (const v of visible) {
-            const dx = p.x - v.x;
-            const dy = p.y - v.y;
-            if (dx*dx + dy*dy < MIN_DIST_SQ) {
+            // Box overlap check with slight margin
+            if (Math.abs(p.x - v.x) < (p.width + v.width)/2 * 0.8 &&
+                Math.abs(p.y - v.y) < (p.height + v.height)/2 * 0.8) {
                 overlap = true;
                 break;
             }
@@ -450,7 +472,7 @@ const App = () => {
         if (!overlap) {
             visible.push(p);
             p.el.style.opacity = '1';
-            // Center the label (translate -50%) and place it
+            // Translate -50% -50% to center the label on calculated coords
             p.el.style.transform = `translate(-50%, -50%) translate(${p.x}px, ${p.y}px)`;
         }
     }
