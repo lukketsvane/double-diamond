@@ -41,15 +41,24 @@ const INITIAL_POSE: PoseData = {
   "limb_7_joint_2": { "x": 0, "y": 0, "z": 1.57 }
 };
 
-// Label Configuration
-// Top Limbs (0-3): Outer = Discover, Inner = Define
-// Bottom Limbs (4-7): Outer = Deploy, Inner = Develop
-const PROCESS_LABELS = [
-  { text: "discover", limbs: [0, 1, 2, 3], jointIndex: 2 }, // Outer Segment
-  { text: "define",   limbs: [0, 1, 2, 3], jointIndex: 1 }, // Inner Segment
-  { text: "develop",  limbs: [4, 5, 6, 7], jointIndex: 1 }, // Inner Segment
-  { text: "deploy",   limbs: [4, 5, 6, 7], jointIndex: 2 }  // Outer Segment
-];
+// Generate labels for every segment of every limb
+// Limbs 0-3 (Top): Inner(J1)=Define, Outer(J2)=Discover
+// Limbs 4-7 (Bottom): Inner(J1)=Develop, Outer(J2)=Deploy
+const generateLabels = () => {
+    const labels = [];
+    // Top Limbs
+    for(let i=0; i<4; i++) {
+        labels.push({ text: "define", limbIndex: i, jointIndex: 1 });
+        labels.push({ text: "discover", limbIndex: i, jointIndex: 2 });
+    }
+    // Bottom Limbs
+    for(let i=4; i<8; i++) {
+        labels.push({ text: "develop", limbIndex: i, jointIndex: 1 });
+        labels.push({ text: "deploy", limbIndex: i, jointIndex: 2 });
+    }
+    return labels;
+};
+const INDIVIDUAL_LABELS = generateLabels();
 
 const COLORS = {
   light: {
@@ -83,7 +92,6 @@ const createWobblyGeometry = (baseGeo: THREE.BufferGeometry, magnitude: number =
   const count = posAttribute.count;
   
   for (let i = 0; i < count; i++) {
-    // Add random noise to vertices
     const dx = (Math.random() - 0.5) * magnitude;
     const dy = (Math.random() - 0.5) * magnitude;
     const dz = (Math.random() - 0.5) * magnitude;
@@ -106,7 +114,6 @@ const stripMarkdown = (text: string) => {
     return clean.trim();
 };
 
-// --- Hook: System Theme ---
 const useSystemTheme = (): ThemeMode => {
   const getTheme = () => {
     if (typeof window === 'undefined') return 'light';
@@ -131,19 +138,16 @@ const App = () => {
   const mountRef = useRef<HTMLDivElement>(null);
   const theme = useSystemTheme();
   
-  // State
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isCanvasMode, setIsCanvasMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   
-  // Independent Mode Toggles
   const [orbitEnabled, setOrbitEnabled] = useState(true);
   const [grabEnabled, setGrabEnabled] = useState(true);
 
-  // Refs
   const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const creatureRef = useRef<THREE.Group | null>(null);
@@ -151,7 +155,6 @@ const App = () => {
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
   
-  // Interaction Refs
   const isDraggingRef = useRef(false);
   const dragPlaneRef = useRef(new THREE.Plane());
   const dragStartPointRef = useRef(new THREE.Vector3());
@@ -159,15 +162,12 @@ const App = () => {
   const jointWorldPosRef = useRef(new THREE.Vector3());
   const previousPointerRef = useRef({ x: 0, y: 0 });
 
-  // Canvas Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isDrawingRef = useRef(false);
 
-  // Labels Refs
   const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  // Material Refs
   const limbMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const highlightMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
   const jointMaterialRef = useRef<THREE.MeshStandardMaterial>(new THREE.MeshStandardMaterial());
@@ -188,17 +188,26 @@ const App = () => {
   useEffect(() => {
     if (!mountRef.current) return;
 
-    // Scene
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x000000, 0.03); 
     sceneRef.current = scene;
 
-    // Camera
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 8);
+    // ORTHOGRAPHIC CAMERA SETUP
+    const frustumSize = 12;
+    const aspect = window.innerWidth / window.innerHeight;
+    const camera = new THREE.OrthographicCamera(
+        frustumSize * aspect / -2,
+        frustumSize * aspect / 2,
+        frustumSize / 2,
+        frustumSize / -2,
+        0.1,
+        1000
+    );
+    camera.position.set(0, 0, 100);
+    camera.zoom = 1;
+    camera.updateProjectionMatrix();
     cameraRef.current = camera;
 
-    // Renderer
     const renderer = new THREE.WebGLRenderer({ 
         antialias: true, 
         alpha: false,
@@ -210,39 +219,35 @@ const App = () => {
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
     scene.add(ambientLight);
     
     const dirLight = new THREE.DirectionalLight(0xffffff, 2);
-    dirLight.position.set(5, 10, 7);
+    dirLight.position.set(5, 10, 20);
     scene.add(dirLight);
     
     const backLight = new THREE.DirectionalLight(0xffffff, 1);
-    backLight.position.set(-5, -5, -5);
+    backLight.position.set(-5, -5, -20);
     scene.add(backLight);
 
     lightsRef.current = { ambient: ambientLight, directional: dirLight, back: backLight };
 
-    // Controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.enablePan = false;
+    controls.enableRotate = true;
     controls.enabled = true;
     controlsRef.current = controls;
 
-    // --- Build Creature ---
     const creatureGroup = new THREE.Group();
     creatureRef.current = creatureGroup;
     scene.add(creatureGroup);
 
     limbMaterialRef.current.roughness = 0.5;
     limbMaterialRef.current.metalness = 0.5;
-    
     highlightMaterialRef.current.roughness = 0.5;
     highlightMaterialRef.current.metalness = 0.5;
-    
     jointMaterialRef.current.roughness = 0.1;
     jointMaterialRef.current.metalness = 0.9;
 
@@ -257,14 +262,12 @@ const App = () => {
 
         const seg1Length = 1.5;
         
-        // 1. Visual Mesh (Wobbly)
         const seg1BaseGeo = new THREE.BoxGeometry(0.04, seg1Length, 0.04, 3, 12, 3);
         const seg1Geo = createWobblyGeometry(seg1BaseGeo, 0.02);
         const seg1 = new THREE.Mesh(seg1Geo, limbMaterialRef.current);
         seg1.position.y = seg1Length / 2;
         seg1.name = "visual";
         
-        // 2. Hitbox Mesh (Thicker)
         const seg1HitboxGeo = new THREE.BoxGeometry(0.25, seg1Length, 0.25);
         const seg1Hitbox = new THREE.Mesh(seg1HitboxGeo, invisibleMaterialRef.current);
         seg1Hitbox.position.y = seg1Length / 2;
@@ -285,14 +288,12 @@ const App = () => {
 
         const seg2Length = 2.0;
         
-        // 3. Segment 2 Visual (Wobbly)
         const seg2BaseGeo = new THREE.ConeGeometry(0.02, seg2Length, 6, 12);
         const seg2Geo = createWobblyGeometry(seg2BaseGeo, 0.02);
         const seg2 = new THREE.Mesh(seg2Geo, limbMaterialRef.current);
         seg2.position.y = seg2Length / 2;
         seg2.name = "visual";
 
-        // 4. Segment 2 Hitbox
         const seg2HitboxGeo = new THREE.ConeGeometry(0.25, seg2Length, 4);
         const seg2Hitbox = new THREE.Mesh(seg2HitboxGeo, invisibleMaterialRef.current);
         seg2Hitbox.position.y = seg2Length / 2;
@@ -312,7 +313,6 @@ const App = () => {
     angles.forEach((angle, i) => createLimb(true, angle, i));
     angles.forEach((angle, i) => createLimb(false, angle, i + 4));
 
-    // Load Pose
     try {
         const cached = localStorage.getItem(CACHE_KEY);
         if (cached) {
@@ -324,7 +324,6 @@ const App = () => {
         applyPoseToRef(INITIAL_POSE, creatureGroup);
     }
 
-    // Animation Loop
     const tempV = new THREE.Vector3();
 
     const animate = () => {
@@ -333,41 +332,32 @@ const App = () => {
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
         
-        // Update Labels
+        // Update Labels (Individual for each segment)
         if (!isCanvasMode) {
-            PROCESS_LABELS.forEach((item, index) => {
+            INDIVIDUAL_LABELS.forEach((item, index) => {
                 const labelDiv = labelRefs.current[index];
                 if (!labelDiv || !creatureGroup) return;
 
-                tempV.set(0,0,0);
-                let count = 0;
+                const jointName = `limb_${item.limbIndex}_joint_${item.jointIndex}`;
+                let targetMesh: THREE.Object3D | null = null;
                 
-                // Average position of all segments in this group
-                item.limbs.forEach(limbIdx => {
-                    const jointName = `limb_${limbIdx}_joint_${item.jointIndex}`;
-                    // We need to find the specific joint Group, then get the "visual" child's world position
-                    creatureGroup.traverse(obj => {
-                        if (obj.name === jointName) {
-                            const visual = obj.children.find(c => c.name === "visual");
-                            if (visual) {
-                                const worldPos = new THREE.Vector3();
-                                visual.getWorldPosition(worldPos);
-                                tempV.add(worldPos);
-                                count++;
-                            }
-                        }
-                    });
+                creatureGroup.traverse(obj => {
+                    if (obj.name === jointName) {
+                        const visual = obj.children.find(c => c.name === "visual");
+                        if (visual) targetMesh = visual;
+                    }
                 });
 
-                if (count > 0) {
-                    tempV.divideScalar(count);
+                if (targetMesh) {
+                    (targetMesh as THREE.Mesh).getWorldPosition(tempV);
                     const projV = tempV.clone().project(cameraRef.current!);
 
                     const x = (projV.x * .5 + .5) * window.innerWidth;
                     const y = (projV.y * -.5 + .5) * window.innerHeight;
 
-                    // Fade out if behind camera or too far off screen
-                    if (projV.z > 1 || Math.abs(projV.x) > 1.2 || Math.abs(projV.y) > 1.2) {
+                    // Orthographic projection logic for visibility
+                    // Check if it's within the -1 to 1 range
+                    if (Math.abs(projV.x) > 1.1 || Math.abs(projV.y) > 1.1) {
                          labelDiv.style.opacity = '0';
                     } else {
                         labelDiv.style.opacity = '1';
@@ -387,7 +377,6 @@ const App = () => {
     };
   }, []);
 
-  // --- Logic Helpers ---
   const applyPoseToRef = (pose: PoseData, group: THREE.Group) => {
       group.traverse((obj) => {
           if (obj.userData.isJoint && obj.userData.id && pose[obj.userData.id]) {
@@ -398,7 +387,6 @@ const App = () => {
   };
 
   const generateRandomPose = () => {
-     // Re-using strategies but mapping to new concept internally
      const strategies = [
          () => {
              const j1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
@@ -431,7 +419,6 @@ const App = () => {
       }
   }
 
-  // --- Interactions ---
   const handlePointerDown = (e: React.PointerEvent) => {
     const rect = rendererRef.current!.domElement.getBoundingClientRect();
     mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -471,15 +458,10 @@ const App = () => {
             selectJoint(hit.object as THREE.Mesh);
         }
     } else {
-        // Deselect if tapping background
         if (selectedMeshRef.current) {
             selectedMeshRef.current.material = limbMaterialRef.current;
             selectedMeshRef.current = null;
             setSelectedId(null);
-        }
-        
-        if (!orbitEnabled && grabEnabled) {
-            // Placeholder logic preserved
         }
     }
     e.stopPropagation();
@@ -525,11 +507,10 @@ const App = () => {
 
           const sensitivity = 0.005;
           const cam = cameraRef.current!;
-          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-
-          const rotX = new THREE.Quaternion().setFromAxisAngle(camRight, deltaY * sensitivity);
-          const rotY = new THREE.Quaternion().setFromAxisAngle(camUp, deltaX * sensitivity);
+          // For Orthographic, rotation interaction feels different, keep standard mapping for now
+          // or simple trackball logic
+          const rotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), deltaY * sensitivity);
+          const rotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), deltaX * sensitivity);
           const deltaQ = rotY.multiply(rotX);
           
           const currentWorldQ = new THREE.Quaternion();
@@ -575,7 +556,6 @@ const App = () => {
       }
   };
 
-  // --- Canvas & AI ---
   useEffect(() => {
       if (isCanvasMode && canvasRef.current) {
           const canvas = canvasRef.current;
@@ -628,29 +608,29 @@ const App = () => {
       if (!canvasRef.current) return;
       setIsGenerating(true);
       try {
+        if (!process.env.API_KEY) {
+            throw new Error("API Key is missing. Please set the API_KEY environment variable.");
+        }
+        
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const dataUrl = canvasRef.current.toDataURL("image/png");
         const base64Data = dataUrl.split(",")[1];
         
         const prompt = `
-          Analyze this sketch of a Double Diamond process visualization.
-          The creature has 8 limbs grouped into 4 pairs representing the process phases:
+          Analyze this sketch of a 3D structure with 8 articulated limbs (4 top, 4 bottom).
+          Return a JSON object with rotational values (x, y, z in radians) for all 16 joints.
           
-          1. DISCOVER: Top-most Outer Segments (Limbs 0-3, Joint 2).
-          2. DEFINE: Top-most Inner Segments (Limbs 0-3, Joint 1).
-          3. DEVELOP: Bottom-most Inner Segments (Limbs 4-7, Joint 1).
-          4. DEPLOY: Bottom-most Outer Segments (Limbs 4-7, Joint 2).
-
-          Estimate the 3D local rotations (x, y, z in radians) for all 16 joints (2 per limb) to match the pose in the sketch.
-          Ensure the output is a valid JSON object matching the schema.
+          Structure:
+          - 8 Limbs indexed 0 to 7.
+          - Each limb has 2 joints: joint_1 (base/inner) and joint_2 (mid/outer).
+          
+          Required JSON Format:
+          {
+            "limb_0_joint_1": { "x": 0, "y": 0, "z": 0 },
+            "limb_0_joint_2": { "x": 0, "y": 0, "z": 0 },
+            ... (up to limb_7_joint_2)
+          }
         `;
-
-        // Explicitly define schema properties for all 16 joints to ensure valid JSON
-        const properties: any = {};
-        for(let i=0; i<8; i++) {
-            properties[`limb_${i}_joint_1`] = { type: Type.OBJECT, properties: { x: {type: Type.NUMBER}, y: {type: Type.NUMBER}, z: {type: Type.NUMBER} } };
-            properties[`limb_${i}_joint_2`] = { type: Type.OBJECT, properties: { x: {type: Type.NUMBER}, y: {type: Type.NUMBER}, z: {type: Type.NUMBER} } };
-        }
 
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
@@ -661,13 +641,7 @@ const App = () => {
                 ]
             },
             config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  description: "Pose data for the Double Diamond creature",
-                  properties: properties,
-                  required: Object.keys(properties)
-                }
+                responseMimeType: "application/json"
             }
         });
 
@@ -680,13 +654,12 @@ const App = () => {
         setIsCanvasMode(false);
       } catch (err) {
           console.error("Failed to generate pose", err);
-          alert("Could not generate pose. Please check if the API Key is configured correctly in the environment.");
+          alert("Could not generate pose. Check console for details.");
       } finally {
           setIsGenerating(false);
       }
   };
 
-  // --- Dynamic Theme ---
   useEffect(() => {
     const palette = COLORS[theme];
     if (sceneRef.current) {
@@ -706,7 +679,14 @@ const App = () => {
 
   const handleResize = useCallback(() => {
     if (cameraRef.current && rendererRef.current) {
-      cameraRef.current.aspect = window.innerWidth / window.innerHeight;
+      const frustumSize = 12;
+      const aspect = window.innerWidth / window.innerHeight;
+      
+      cameraRef.current.left = -frustumSize * aspect / 2;
+      cameraRef.current.right = frustumSize * aspect / 2;
+      cameraRef.current.top = frustumSize / 2;
+      cameraRef.current.bottom = -frustumSize / 2;
+      
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(window.innerWidth, window.innerHeight);
     }
@@ -720,7 +700,6 @@ const App = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, [handleResize]);
 
-  // --- Utils ---
   const resetPose = () => { if (creatureRef.current) applyPoseToRef(INITIAL_POSE, creatureRef.current); };
   const copyPose = async () => {
       if (!creatureRef.current) return;
@@ -746,7 +725,6 @@ const App = () => {
   const isDark = theme === 'dark';
   const bgClass = isDark ? 'bg-black text-white' : 'bg-[#F2F2F7] text-black';
   
-  // UI Styles - Minimal (No text labels)
   const iconBtnClass = (active: boolean) => 
     `flex items-center justify-center w-12 h-12 rounded-full transition-all active:scale-95 shadow-md ${
       active 
@@ -775,19 +753,18 @@ const App = () => {
         onPointerLeave={handlePointerUp}
       />
       
-      {/* 3D Labels Layer */}
-      {!isCanvasMode && PROCESS_LABELS.map((item, i) => (
+      {/* 3D Labels Layer - Now Individual for each limb segment */}
+      {!isCanvasMode && INDIVIDUAL_LABELS.map((item, i) => (
           <div 
-             key={item.text}
+             key={`${item.limbIndex}-${item.jointIndex}`}
              ref={el => labelRefs.current[i] = el}
-             className={`absolute top-0 left-0 text-sm font-medium tracking-wide pointer-events-none transition-all duration-300 ${isDark ? 'text-white/80' : 'text-black/80'}`}
-             style={{ opacity: 0 }} // Controlled by animation loop
+             className={`absolute top-0 left-0 text-xs font-bold uppercase tracking-wider pointer-events-none transition-all duration-300 ${isDark ? 'text-white/60' : 'text-black/60'}`}
+             style={{ opacity: 0 }} 
           >
               {item.text}
           </div>
       ))}
 
-      {/* Canvas Overlay */}
       {isCanvasMode && (
           <div className="absolute inset-0 z-50 bg-white cursor-crosshair touch-none">
               <canvas 
@@ -801,8 +778,6 @@ const App = () => {
                 onTouchMove={draw}
                 onTouchEnd={stopDrawing}
               />
-              
-              {/* Canvas Controls */}
               <div className="absolute top-safe right-4 mt-12 flex flex-col gap-4">
                   <button onClick={() => setIsCanvasMode(false)} className="bg-black/10 hover:bg-black/20 p-3 rounded-full text-black">
                       <X size={24} />
@@ -831,11 +806,8 @@ const App = () => {
           </div>
       )}
 
-       {/* Minimal Control Cluster */}
        {!isCanvasMode && (
        <div className="absolute bottom-10 left-0 right-0 flex flex-col items-center gap-4 z-40 pointer-events-none">
-            
-            {/* Top Row: Actions */}
             <div className={`pointer-events-auto ${pillContainerClass}`}>
                   <button onClick={copyPose} className={secondaryBtnClass}>
                       {copied ? <Check size={16} className="text-green-500"/> : <Copy size={16} />}
@@ -847,29 +819,21 @@ const App = () => {
                       <Download size={16} />
                   </button>
             </div>
-
-            {/* Bottom Row: Main Modes */}
             <div className="flex items-center gap-4 pointer-events-auto">
                  <button onClick={() => setOrbitEnabled(!orbitEnabled)} className={iconBtnClass(orbitEnabled)}>
                     <Eye size={20} strokeWidth={2} />
                  </button>
-                 
                  <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}>
                     <Hand size={20} strokeWidth={2} />
                  </button>
-
                  <div className="w-px h-6 bg-current opacity-20 mx-1"></div>
-
                  <button onClick={() => setIsCanvasMode(true)} className={iconBtnClass(false)}>
                     <Pencil size={20} strokeWidth={2} />
                  </button>
             </div>
-
-            {/* Reset */}
             <button onClick={resetPose} className={`pointer-events-auto flex items-center justify-center w-8 h-8 rounded-full opacity-50 hover:opacity-100 transition-opacity ${isDark ? 'bg-white/10 text-white' : 'bg-black/10 text-black'}`}>
                 <RefreshCcw size={14} />
             </button>
-
        </div>
        )}
     </div>
