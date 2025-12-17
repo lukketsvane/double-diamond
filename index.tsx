@@ -41,6 +41,25 @@ const INITIAL_POSE: PoseData = {
   "limb_7_joint_2": { "x": 0, "y": 0, "z": 1.57 }
 };
 
+const PRESET_POSE: PoseData = {
+  "limb_0_joint_1": { "x": -0.102, "y": 0.062, "z": 1.451 },
+  "limb_0_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_1_joint_1": { "x": 0.287, "y": 1.012, "z": 1.65 },
+  "limb_1_joint_2": { "x": -0.53, "y": -0.623, "z": 1.227 },
+  "limb_2_joint_1": { "x": -0.109, "y": -0.05, "z": 1.444 },
+  "limb_2_joint_2": { "x": -0.104, "y": -0.141, "z": 1.587 },
+  "limb_3_joint_1": { "x": 0.065, "y": 1.066, "z": 2.036 },
+  "limb_3_joint_2": { "x": -0.897, "y": -0.518, "z": 0.936 },
+  "limb_4_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_4_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_5_joint_1": { "x": 0.611, "y": 0.557, "z": 0.647 },
+  "limb_5_joint_2": { "x": -1.813, "y": -0.873, "z": -0.359 },
+  "limb_6_joint_1": { "x": 0, "y": 0, "z": 0 },
+  "limb_6_joint_2": { "x": 0, "y": 0, "z": 1.57 },
+  "limb_7_joint_1": { "x": -0.582, "y": 1.014, "z": 1.42 },
+  "limb_7_joint_2": { "x": -0.499, "y": 0.572, "z": -1.179 }
+};
+
 // Generate labels: Smarter, less cluttered logic.
 const generateLabels = () => {
     const labels = [];
@@ -392,6 +411,7 @@ const App = () => {
 
   const generateRandomPose = () => {
      const strategies = [
+         () => PRESET_POSE, // Add the specific preset to the shuffle
          () => {
              const j1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
              const j2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
@@ -424,7 +444,6 @@ const App = () => {
   }
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Double tap detection logic
     const currentTime = new Date().getTime();
     const tapLength = currentTime - lastTapRef.current;
     if (tapLength < 300 && tapLength > 0) {
@@ -601,7 +620,6 @@ const App = () => {
       isDrawingRef.current = false;
       ctxRef.current?.closePath();
       
-      // Magic Pose: Increment stroke and check if done
       const newCount = strokeCount + 1;
       setStrokeCount(newCount);
       
@@ -636,26 +654,22 @@ const App = () => {
         const dataUrl = canvasRef.current.toDataURL("image/png");
         const base64Data = dataUrl.split(",")[1];
         
+        // Fast, direct prompt assuming Front View
         const prompt = `
-          Analyze this sketch where the user has drawn exactly 8 strokes.
-          Each stroke corresponds to one of the 8 articulated limbs of the figure from the current view perspective.
+          You are an expert 3D kinematic engine.
+          TASK: Analyze this 2D sketch of a stick figure seen from the FRONT VIEW (Camera at 0,0,Z).
+          The sketch has exactly 8 limbs (strokes).
           
-          Structure:
-          - 8 Limbs indexed 0 to 7.
-          - Limbs 0-3 are the top (arms/upper).
-          - Limbs 4-7 are the bottom (legs/lower).
+          MAPPING:
+          - Limbs 0,1,2,3 are the UPPER BODY (Arms/Shoulders).
+          - Limbs 4,5,6,7 are the LOWER BODY (Legs/Hips).
           
-          Your task:
-          1. Map each drawn stroke to one of the 8 limbs.
-          2. Determine the 3D rotation (x, y, z radians) for both joints of each limb (joint_1: base, joint_2: mid) to best match the drawn visual angle and direction.
-          3. Return a JSON object with these rotations.
+          OUTPUT:
+          Calculate the 3D rotation (x, y, z radians) for both joints (joint_1, joint_2) of all 8 limbs to match the visual angles in the sketch.
+          If a limb looks short, it is foreshortened (rotated towards/away from camera).
           
-          Required JSON Format:
-          {
-            "limb_0_joint_1": { "x": 0, "y": 0, "z": 0 },
-            "limb_0_joint_2": { "x": 0, "y": 0, "z": 0 },
-            ... (up to limb_7_joint_2)
-          }
+          Return ONLY a raw JSON object. No markdown.
+          Format: { "limb_0_joint_1": { "x": 0, "y": 0, "z": 0 }, ... }
         `;
 
         const response = await ai.models.generateContent({
@@ -676,6 +690,10 @@ const App = () => {
         
         if (creatureRef.current) {
             applyPoseToRef(pose, creatureRef.current);
+            // Reset to front view to match the sketch perspective
+            if (controlsRef.current) {
+                controlsRef.current.reset();
+            }
         }
         setIsCanvasMode(false);
         setStrokeCount(0);
@@ -751,9 +769,9 @@ const App = () => {
   };
 
   const isDark = theme === 'dark';
+  // Ensure white text when bg is black (isDark)
   const bgClass = isDark ? 'bg-black text-white' : 'bg-[#F2F2F7] text-black';
   
-  // Cleaned up UI classes: No shadows
   const iconBtnClass = (active: boolean) => 
     `flex items-center justify-center w-12 h-12 rounded-full transition-all active:scale-95 ${
       active 
@@ -819,7 +837,7 @@ const App = () => {
               {/* Stroke Counter / Status */}
               <div className="absolute top-12 left-0 right-0 flex justify-center pointer-events-none">
                    <div className="bg-black/10 text-black px-4 py-2 rounded-full font-hand text-2xl font-bold">
-                       {isGenerating ? "Thinking..." : `${strokeCount} / 8`}
+                       {isGenerating ? "..." : `${strokeCount} / 8`}
                    </div>
               </div>
 
