@@ -14,7 +14,9 @@ import {
   Pencil,
   X,
   Trash2,
-  Grid3X3
+  Grid3X3,
+  Moon,
+  Sun
 } from "lucide-react";
 
 // --- Types ---
@@ -104,29 +106,6 @@ const generateLabels = () => {
 };
 const INDIVIDUAL_LABELS = generateLabels();
 
-const COLORS = {
-  light: {
-    bg: 0xf2f2f7,
-    fog: 0xf2f2f7,
-    limb: 0x000000, 
-    joint: 0x000000,
-    edge: 0xaeaeb2,
-    ambient: 0xffffff,
-    directional: 0xffffff,
-    back: 0x8e8e93
-  },
-  dark: {
-    bg: 0x000000,
-    fog: 0x000000,
-    limb: 0xf2f2f7,
-    joint: 0x2c2c2e,
-    edge: 0x636366,
-    ambient: 0x404040,
-    directional: 0xffffff,
-    back: 0x0a84ff
-  }
-};
-
 const CACHE_KEY = "mento_pose_cache";
 
 const createWobblyGeometry = (baseGeo: THREE.BufferGeometry, magnitude: number = 0.015) => {
@@ -153,26 +132,18 @@ const stripMarkdown = (text: string) => {
     return clean.trim();
 };
 
-const useSystemTheme = (): ThemeMode => {
-  const getTheme = () => {
-    if (typeof window === 'undefined') return 'light';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  };
-  const [theme, setTheme] = useState<ThemeMode>(getTheme);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? 'dark' : 'light');
-    mediaQuery.addEventListener('change', handler);
-    return () => mediaQuery.removeEventListener('change', handler);
-  }, []);
-  return theme;
-};
-
 const App = () => {
   const mountRef = useRef<HTMLDivElement>(null);
-  const theme = useSystemTheme();
   
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+      if (typeof window !== 'undefined') {
+           const saved = localStorage.getItem('theme');
+           if (saved === 'light' || saved === 'dark') return saved as ThemeMode;
+           return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      return 'light';
+  });
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isCanvasMode, setIsCanvasMode] = useState(false);
@@ -181,6 +152,8 @@ const App = () => {
   
   const [orbitEnabled, setOrbitEnabled] = useState(true);
   const [grabEnabled, setGrabEnabled] = useState(true);
+  
+  const [userPresets, setUserPresets] = useState<PoseData[]>([]);
 
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -219,12 +192,30 @@ const App = () => {
 
   const lightsRef = useRef<{ ambient: THREE.AmbientLight; directional: THREE.DirectionalLight; back: THREE.DirectionalLight; } | null>(null);
 
+  const toggleTheme = () => {
+      const next = theme === 'light' ? 'dark' : 'light';
+      setTheme(next);
+      localStorage.setItem('theme', next);
+  };
+
+  useEffect(() => {
+    if (sceneRef.current) {
+        const bg = theme === 'dark' ? 0x000000 : 0xF2F2F7;
+        sceneRef.current.background = new THREE.Color(bg);
+        if (sceneRef.current.fog) {
+            (sceneRef.current.fog as THREE.FogExp2).color.setHex(bg);
+        }
+    }
+  }, [theme]);
+
   // --- 3D Initialization ---
   useEffect(() => {
     if (!mountRef.current) return;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x000000, 0.03); 
+    const bg = theme === 'dark' ? 0x000000 : 0xF2F2F7;
+    scene.background = new THREE.Color(bg);
+    scene.fog = new THREE.FogExp2(bg, 0.03); 
     sceneRef.current = scene;
 
     const frustumSize = 12;
@@ -372,7 +363,7 @@ const App = () => {
       mountRef.current?.removeChild(renderer.domElement);
       renderer.dispose();
     };
-  }, [showLabels]); 
+  }, []); // Remove dependency on showLabels to prevent re-init. Colors handled by effect.
 
   const updateLabels = (creatureGroup: THREE.Group) => {
     if (isCanvasMode) return;
@@ -421,6 +412,7 @@ const App = () => {
      const strategies = [
          () => PRESET_POSE, 
          () => PRESET_POSE_2,
+         ...userPresets.map(p => () => p),
          () => {
              const j1 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
              const j2 = { x: (Math.random()-0.5)*3, y: (Math.random()-0.5)*2, z: (Math.random()-0.5)*2 };
@@ -859,6 +851,7 @@ const App = () => {
       return { x: e.clientX, y: e.clientY };
   };
   const resetPose = () => { if (creatureRef.current) applyPoseToRef(INITIAL_POSE, creatureRef.current); };
+  
   const copyPose = async () => {
       if (!creatureRef.current) return;
       const poseData: PoseData = {};
@@ -867,6 +860,10 @@ const App = () => {
               poseData[obj.userData.id] = { x: Number(obj.rotation.x.toFixed(3)), y: Number(obj.rotation.y.toFixed(3)), z: Number(obj.rotation.z.toFixed(3)) };
           }
       });
+      
+      // Save to user presets
+      setUserPresets(prev => [...prev, poseData]);
+
       const json = JSON.stringify(poseData, null, 2);
       try { await navigator.clipboard.writeText(json); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (err) { console.error(err); }
   };
@@ -897,17 +894,14 @@ const App = () => {
       ))}
 
       {isCanvasMode && (
-          <div className="absolute inset-0 z-50 bg-white cursor-crosshair touch-none">
+          <div className={`absolute inset-0 z-50 cursor-crosshair touch-none ${bgClass}`}>
               <canvas ref={canvasRef} className="w-full h-full" onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing} />
               <div className="absolute top-safe right-4 mt-12 flex flex-col gap-4">
-                  <button onClick={() => { setIsCanvasMode(false); setStrokeCount(0); strokesRef.current=[]; }} className="bg-black/10 hover:bg-black/20 p-2 rounded-full text-black"><X size={20} /></button>
-                  <button onClick={clearCanvas} className="bg-black/10 hover:bg-black/20 p-2 rounded-full text-black"><Trash2 size={20} /></button>
-              </div>
-              <div className="absolute top-12 left-0 right-0 flex justify-center pointer-events-none">
-                   <div className="bg-black/10 text-black px-4 py-1 rounded-full font-hand text-xl font-bold">{isGenerating ? "..." : `${strokeCount} / 8`}</div>
+                  <button onClick={() => { setIsCanvasMode(false); setStrokeCount(0); strokesRef.current=[]; }} className={`${isDark ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-black/10 hover:bg-black/20 text-black'} p-2 rounded-full`}><X size={20} /></button>
+                  <button onClick={clearCanvas} className={`${isDark ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-black/10 hover:bg-black/20 text-black'} p-2 rounded-full`}><Trash2 size={20} /></button>
               </div>
               <div className="absolute bottom-12 left-0 right-0 flex justify-center items-center pointer-events-none">
-                 {isGenerating && (<div className={`pointer-events-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full font-bold shadow-none transition-all bg-gray-400 text-white`}><RefreshCcw className="animate-spin" size={20} /></div>)}
+                 {isGenerating && (<div className={`pointer-events-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full font-bold shadow-none transition-all bg-transparent ${isDark ? 'text-white' : 'text-black'}`}><RefreshCcw className="animate-spin" size={20} /></div>)}
               </div>
           </div>
       )}
@@ -928,6 +922,9 @@ const App = () => {
                     <Eye size={16} strokeWidth={2} />
                  </button>
                  <button onClick={() => setGrabEnabled(!grabEnabled)} className={iconBtnClass(grabEnabled)}><Hand size={16} strokeWidth={2} /></button>
+                 <button onClick={toggleTheme} className={iconBtnClass(false)}>
+                    {isDark ? <Moon size={16} strokeWidth={2} /> : <Sun size={16} strokeWidth={2} />}
+                 </button>
                  <button onClick={snapToGrid} className={iconBtnClass(false)}><Grid3X3 size={16} strokeWidth={2} /></button>
                  <div className="w-px h-5 bg-current opacity-20 mx-0.5"></div>
                  <button onClick={() => { setIsCanvasMode(true); setStrokeCount(0); strokesRef.current = []; }} className={iconBtnClass(false)}><Pencil size={16} strokeWidth={2} /></button>
